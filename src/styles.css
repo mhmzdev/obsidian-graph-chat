@@ -22,8 +22,9 @@
   min-width: 90px;
   padding: 8px 14px;
   border-radius: 10px;
-  background: var(--background-secondary);
-  border: 1px solid var(--background-modifier-border-hover);
+  background: var(--background-primary);
+  border: 1.5px solid color-mix(in srgb, var(--text-muted) 55%, transparent);
+  box-shadow: var(--shadow-s);
   transition: border-color 0.15s ease, transform 0.15s ease,
     box-shadow 0.15s ease;
   cursor: grab;
@@ -59,10 +60,9 @@
   );
 }
 
-/* branch-a-new-chat button, appears on hover at the card's right edge */
+/* branch-a-new-chat buttons, appear on hover at the card's edges */
 .gc-plus-btn {
   position: absolute;
-  right: -13px;
   top: 50%;
   transform: translateY(-50%);
   width: 26px;
@@ -78,6 +78,14 @@
   transition: opacity 0.15s ease;
   box-shadow: var(--shadow-s);
   padding: 0;
+}
+
+.gc-plus-right {
+  right: -13px;
+}
+
+.gc-plus-left {
+  left: -13px;
 }
 
 .gc-note-card:hover .gc-plus-btn {
@@ -201,20 +209,25 @@
 .gc-chat-input-row {
   display: flex;
   gap: 6px;
-  padding: 8px;
+  padding: 8px 8px 4px 8px;
   border-top: 1px solid var(--background-modifier-border);
+  align-items: flex-end;
 }
 
 .gc-chat-input {
   flex: 1;
   resize: none;
-  height: 44px;
+  min-height: 36px;
+  max-height: 110px;
+  overflow-y: auto;
   font-size: 12.5px;
+  line-height: 1.4;
   border-radius: 6px;
   background: var(--background-secondary);
   border: 1px solid var(--background-modifier-border);
   color: var(--text-normal);
-  padding: 6px 8px;
+  padding: 8px;
+  box-sizing: border-box;
 }
 
 .gc-send-btn {
@@ -224,11 +237,92 @@
   color: var(--text-on-accent);
   cursor: pointer;
   width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .gc-send-btn:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+.gc-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid color-mix(in srgb, var(--text-on-accent) 35%, transparent);
+  border-top-color: var(--text-on-accent);
+  border-radius: 50%;
+  animation: gc-spin 0.8s linear infinite;
+}
+
+@keyframes gc-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.gc-typing {
+  color: var(--text-faint);
+  font-style: italic;
+}
+
+.gc-chat-footer {
+  display: flex;
+  padding: 2px 8px 6px 8px;
+}
+
+.gc-model-select {
+  font-size: 10.5px;
+  padding: 1px 4px;
+  border-radius: 5px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+/* markdown inside assistant messages — compact */
+.gc-md p,
+.gc-md ul,
+.gc-md ol {
+  margin: 0 0 6px 0;
+}
+
+.gc-md p:last-child,
+.gc-md ul:last-child,
+.gc-md ol:last-child {
+  margin-bottom: 0;
+}
+
+.gc-md ul,
+.gc-md ol {
+  padding-inline-start: 18px;
+}
+
+.gc-md h1,
+.gc-md h2,
+.gc-md h3,
+.gc-md h4 {
+  font-size: 13px;
+  margin: 8px 0 4px 0;
+}
+
+.gc-md pre {
+  overflow-x: auto;
+  font-size: 11px;
+  padding: 6px;
+  border-radius: 6px;
+}
+
+.gc-md code {
+  font-size: 11px;
+}
+
+.gc-md a.internal-link {
+  color: var(--link-color, var(--interactive-accent));
 }
 
 /* --- edges & misc --- */

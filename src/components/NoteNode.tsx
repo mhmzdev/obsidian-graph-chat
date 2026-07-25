@@ -3,6 +3,8 @@ import { Handle, Position, NodeProps } from "@xyflow/react";
 import { usePluginCtx } from "./PluginContext";
 import type { VaultNodeKind } from "../graph/buildGraph";
 
+export type BranchSide = "left" | "right";
+
 export interface NoteNodeData {
   label: string;
   path: string;
@@ -12,15 +14,17 @@ export interface NoteNodeData {
     notePath: string,
     nodeId: string,
     kind: VaultNodeKind,
-    forceNew?: boolean
+    forceNew?: boolean,
+    side?: BranchSide
   ) => void;
   [key: string]: unknown;
 }
 
 /**
  * Rounded card with the note title inside.
- * Single click → open chat (if none open yet). Double click → open the note.
- * Hover “+” → branch another chat off the same note (new session, same anchor).
+ * Single click → open chat (reopens the thread for saved chat notes).
+ * Double click → open the note. Hover “+” on either edge → branch a new
+ * chat out of that side.
  */
 export function NoteNode({ id, data }: NodeProps) {
   const d = data as NoteNodeData;
@@ -32,10 +36,44 @@ export function NoteNode({ id, data }: NodeProps) {
     if (file) app.workspace.getLeaf("tab").openFile(file as any);
   };
 
+  const cancelPendingClick = () => {
+    if (clickTimer.current !== null) {
+      window.clearTimeout(clickTimer.current);
+      clickTimer.current = null;
+    }
+  };
+
+  const plusBtn = (side: BranchSide) => (
+    <button
+      className={`gc-plus-btn gc-plus-${side}`}
+      title="Branch a new chat from this side"
+      onClick={(e) => {
+        e.stopPropagation();
+        cancelPendingClick();
+        d.onStartChat(d.path, id, d.kind, true, side);
+      }}
+      onDoubleClick={(e) => e.stopPropagation()}
+    >
+      +
+    </button>
+  );
+
   return (
     <div className="gc-note-node">
       <Handle type="source" position={Position.Right} className="gc-handle" />
       <Handle type="target" position={Position.Left} className="gc-handle" />
+      <Handle
+        type="source"
+        id="plus-left"
+        position={Position.Left}
+        className="gc-handle"
+      />
+      <Handle
+        type="source"
+        id="plus-right"
+        position={Position.Right}
+        className="gc-handle"
+      />
       <div
         className={`gc-note-card${d.kind === "chat" ? " gc-kind-chat" : ""}${
           d.degree >= 8 ? " gc-hub" : ""
@@ -48,32 +86,14 @@ export function NoteNode({ id, data }: NodeProps) {
           }, 250);
         }}
         onDoubleClick={() => {
-          if (clickTimer.current !== null) {
-            window.clearTimeout(clickTimer.current);
-            clickTimer.current = null;
-          }
+          cancelPendingClick();
           openNote();
         }}
         title={`${d.path}\nclick: chat · double-click: open note`}
       >
         <span className="gc-note-title">{d.label}</span>
-        {d.kind !== "chat" && (
-          <button
-            className="gc-plus-btn"
-            title="Branch a new chat off this note"
-            onClick={(e) => {
-              e.stopPropagation();
-              if (clickTimer.current !== null) {
-                window.clearTimeout(clickTimer.current);
-                clickTimer.current = null;
-              }
-              d.onStartChat(d.path, id, d.kind, true);
-            }}
-            onDoubleClick={(e) => e.stopPropagation()}
-          >
-            +
-          </button>
-        )}
+        {plusBtn("left")}
+        {plusBtn("right")}
       </div>
     </div>
   );

@@ -4,6 +4,7 @@ export interface RunPromptOptions {
   claudePath: string;
   vaultPath: string; // cwd for the CLI — vault root, so CLAUDE.md/skills apply
   prompt: string;
+  model?: string; // CLI model alias/id; omit for the user's default
   resumeSessionId?: string;
   onText: (text: string) => void; // called per assistant message chunk
   onDone: (sessionId: string, fullText: string) => void;
@@ -34,6 +35,9 @@ export function runPrompt(opts: RunPromptOptions): () => void {
     "WebFetch",
     "WebSearch",
   ];
+  if (opts.model) {
+    args.push("--model", opts.model);
+  }
   if (opts.resumeSessionId) {
     args.push("--resume", opts.resumeSessionId);
   }
