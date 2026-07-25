@@ -1,6 +1,11 @@
 import { useRef, useState, useEffect } from "react";
 import { Handle, Position, NodeProps } from "@xyflow/react";
-import { FileSystemAdapter, MarkdownRenderer, Component } from "obsidian";
+import {
+  FileSystemAdapter,
+  MarkdownRenderer,
+  Component,
+  setIcon,
+} from "obsidian";
 import { usePluginCtx } from "./PluginContext";
 import { runPrompt } from "../chat/claudeSession";
 import { saveThread, ChatThread, ChatMessage } from "../chat/persistence";
@@ -9,7 +14,6 @@ import type { BranchSide } from "./NoteNode";
 export interface ForkSnapshot {
   sourceNotePath: string;
   sessionId: string;
-  messages: ChatMessage[];
 }
 
 export interface ChatCardData {
@@ -19,8 +23,11 @@ export interface ChatCardData {
   anchorNodeId?: string;
   /** vault paths dropped onto this card as extra context */
   linkedNotes?: string[];
+  /** kept fresh by the card so drag-forks know the live session */
+  currentSessionId?: string;
   onClose: (nodeId: string) => void;
   onFork: (nodeId: string, side: BranchSide, snapshot: ForkSnapshot) => void;
+  onSessionUpdate: (nodeId: string, sessionId: string) => void;
   [key: string]: unknown;
 }
 
@@ -32,6 +39,23 @@ const MODELS: { label: string; value: string }[] = [
 ];
 
 const INPUT_MAX_HEIGHT = 110; // ~5 lines
+
+/** Lucide icon via Obsidian's built-in icon set. */
+export function Icon({ name, size = 14 }: { name: string; size?: number }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.empty();
+    setIcon(el, name);
+    const svg = el.querySelector("svg");
+    if (svg) {
+      svg.setAttribute("width", String(size));
+      svg.setAttribute("height", String(size));
+    }
+  }, [name, size]);
+  return <span ref={ref} className="gc-icon" />;
+}
 
 /** Assistant messages render as real Obsidian markdown, wikilinks clickable. */
 function MarkdownMsg({ text }: { text: string }) {
@@ -69,6 +93,7 @@ export function ChatCardNode({ id, data }: NodeProps) {
       messages: [],
     }
   );
+  const isForkRef = useRef(!!threadRef.current.forkFromSessionId);
   const [messages, setMessages] = useState<ChatMessage[]>(
     threadRef.current.messages
   );
@@ -85,7 +110,6 @@ export function ChatCardNode({ id, data }: NodeProps) {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const consumedLinksRef = useRef(0);
 
-  const isFork = !!threadRef.current.forkFromSessionId && !threadRef.current.sessionId;
   const linkedNotes = (d.linkedNotes ?? []) as string[];
 
   const sourceName =
@@ -132,8 +156,6 @@ export function ChatCardNode({ id, data }: NodeProps) {
     setMessages([...thread.messages]);
     void persist();
 
-    // Build the prompt: anchor preamble on the very first message of a fresh
-    // thread; freshly-dropped context notes get injected once.
     let prefix = "";
     if (isFirstEver && !thread.forkFromSessionId) {
       prefix += `You are chatting inside an Obsidian vault. This conversation is anchored to the note "${thread.sourceNotePath}". Read that note first, follow its wikilinks if helpful, then answer concisely.\n\n`;
@@ -169,6 +191,7 @@ export function ChatCardNode({ id, data }: NodeProps) {
       onDone: async (sessionId, fullText) => {
         assistantMsg.text = fullText || assistantMsg.text;
         thread.sessionId = sessionId; // fork gets its own id here
+        d.onSessionUpdate(id, sessionId);
         setMessages([...thread.messages]);
         setBusy(false);
         await persist();
@@ -193,13 +216,12 @@ export function ChatCardNode({ id, data }: NodeProps) {
       id={`fork-${side}`}
       position={side === "left" ? Position.Left : Position.Right}
       className={`gc-plus-handle gc-plus-${side} gc-fork-handle`}
-      title="Click: fork this conversation · Drag: link a note into this chat"
+      title="Click: fork this conversation · Drag: link a note in, or drop on empty space to fork there"
       onClick={(e) => {
         e.stopPropagation();
         d.onFork(id, side, {
           sourceNotePath: threadRef.current.sourceNotePath,
           sessionId: threadRef.current.sessionId,
-          messages: threadRef.current.messages.map((m) => ({ ...m })),
         });
       }}
     >
@@ -229,8 +251,9 @@ export function ChatCardNode({ id, data }: NodeProps) {
       {forkHandle("right")}
       <div className="gc-chat-header gc-drag-handle">
         <span className="gc-chat-title">
-          💬 {sourceName}
-          {isFork && <span className="gc-fork-badge">fork</span>}
+          <Icon name="message-circle" size={14} />
+          <span className="gc-chat-title-text">{sourceName}</span>
+          {isForkRef.current && <span className="gc-fork-badge">fork</span>}
         </span>
         <span className="gc-header-btns">
           <button
@@ -239,25 +262,32 @@ export function ChatCardNode({ id, data }: NodeProps) {
             disabled={!savedPath}
             onClick={openChatNote}
           >
-            📄
+            <Icon name="file-text" size={13} />
           </button>
           <button
             className="gc-header-btn"
             title="Close card (chat stays saved)"
             onClick={() => d.onClose(id)}
           >
-            ✕
+            <Icon name="x" size={13} />
           </button>
         </span>
       </div>
       <div className="gc-chat-messages" ref={scrollRef}>
-        {messages.length === 0 && (
-          <div className="gc-chat-empty">
-            Ask anything about <b>{sourceName}</b> — Claude reads your vault
-            (read-only). The thread saves automatically to{" "}
-            <b>{plugin.settings.chatsFolder}/</b>.
-          </div>
-        )}
+        {messages.length === 0 &&
+          (isForkRef.current ? (
+            <div className="gc-chat-empty">
+              <b>Forked conversation</b> — Claude remembers everything up to
+              the fork point of <b>{sourceName}</b>. Continue from here, with
+              any model.
+            </div>
+          ) : (
+            <div className="gc-chat-empty">
+              Ask anything about <b>{sourceName}</b> — Claude reads your vault
+              (read-only). The thread saves automatically to{" "}
+              <b>{plugin.settings.chatsFolder}/</b>.
+            </div>
+          ))}
         {messages.map((m, i) => (
           <div key={i} className={`gc-msg gc-msg-${m.role}`}>
             {m.role === "assistant" ? (
@@ -279,7 +309,8 @@ export function ChatCardNode({ id, data }: NodeProps) {
         <div className="gc-chips">
           {linkedNotes.map((p) => (
             <span key={p} className="gc-chip" title={p}>
-              📎 {p.replace(/\.md$/, "").split("/").pop()}
+              <Icon name="paperclip" size={9} />
+              {p.replace(/\.md$/, "").split("/").pop()}
             </span>
           ))}
         </div>
@@ -309,14 +340,11 @@ export function ChatCardNode({ id, data }: NodeProps) {
           disabled={busy || !input.trim()}
           title={busy ? "Claude is thinking…" : "Send"}
         >
-          {busy ? <span className="gc-spinner" /> : "➤"}
+          {busy ? <span className="gc-spinner" /> : <Icon name="send" size={14} />}
         </button>
       </div>
       <div className="gc-chat-footer">
-        <div
-          className="gc-model-wrap"
-          onMouseLeave={() => setMenuOpen(false)}
-        >
+        <div className="gc-model-wrap" onMouseLeave={() => setMenuOpen(false)}>
           {menuOpen && (
             <div className="gc-model-menu">
               {MODELS.map((m) => (
@@ -331,7 +359,7 @@ export function ChatCardNode({ id, data }: NodeProps) {
                   }}
                 >
                   <span>{m.label}</span>
-                  {m.value === model && <span className="gc-model-check">✓</span>}
+                  {m.value === model && <Icon name="check" size={11} />}
                 </div>
               ))}
             </div>
@@ -341,7 +369,8 @@ export function ChatCardNode({ id, data }: NodeProps) {
             disabled={busy}
             onClick={() => setMenuOpen((o) => !o)}
           >
-            {currentModel.label} <span className="gc-model-caret">▾</span>
+            {currentModel.label}
+            <Icon name="chevron-down" size={11} />
           </button>
         </div>
       </div>

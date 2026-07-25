@@ -203,12 +203,32 @@
 }
 
 .gc-chat-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
   font-size: 13px;
   font-weight: 600;
   color: var(--text-normal);
   white-space: nowrap;
   overflow: hidden;
+  min-width: 0;
+}
+
+.gc-chat-title .gc-icon {
+  color: var(--interactive-accent);
+  flex-shrink: 0;
+}
+
+.gc-chat-title-text {
+  overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.gc-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
 }
 
 .gc-fork-badge {
@@ -239,9 +259,13 @@
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
-  font-size: 12px;
-  padding: 2px 5px;
-  border-radius: 4px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
 }
 
 .gc-header-btn:hover:not(:disabled) {
@@ -454,24 +478,27 @@
 }
 
 .gc-model-btn {
-  font-size: 11px;
-  padding: 3px 9px;
-  border-radius: 7px;
-  background: var(--background-secondary);
-  border: 1px solid var(--background-modifier-border);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  font-weight: 500;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: transparent;
+  border: none;
   color: var(--text-muted);
   cursor: pointer;
-  transition: border-color 0.15s ease, color 0.15s ease;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 
 .gc-model-btn:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--interactive-accent) 50%, transparent);
+  background: var(--background-modifier-hover);
   color: var(--text-normal);
 }
 
-.gc-model-caret {
-  font-size: 8px;
-  opacity: 0.7;
+.gc-model-btn .gc-icon {
+  opacity: 0.6;
 }
 
 .gc-model-menu {
@@ -554,6 +581,40 @@
   color: var(--link-color, var(--interactive-accent));
 }
 
+/* ---------- highlight states ---------- */
+
+/* clicked note → its chats + edges glow */
+.react-flow__node.gc-glow .gc-note-card {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 2px
+      color-mix(in srgb, var(--interactive-accent) 55%, transparent),
+    0 0 22px color-mix(in srgb, var(--interactive-accent) 45%, transparent);
+}
+
+.react-flow__node.gc-glow .gc-chat-card {
+  box-shadow: 0 0 0 2px var(--interactive-accent),
+    0 0 26px color-mix(in srgb, var(--interactive-accent) 40%, transparent);
+}
+
+.gc-edge-glow path {
+  stroke: var(--interactive-accent) !important;
+  stroke-width: 2.5 !important;
+  stroke-dasharray: 6 4;
+}
+
+/* origin note of an open chat card — always marked */
+.react-flow__node.gc-anchor-active .gc-note-card {
+  border-color: var(--interactive-accent);
+  border-style: dashed;
+  background: color-mix(
+    in srgb,
+    var(--interactive-accent) 10%,
+    var(--background-primary)
+  );
+  box-shadow: 0 0 14px
+    color-mix(in srgb, var(--interactive-accent) 30%, transparent);
+}
+
 /* ---------- edges & misc ---------- */
 
 .gc-edge path {
@@ -570,7 +631,29 @@
   stroke-dasharray: 2 4;
 }
 
+/* selected edge (click it, then press Delete/Backspace to remove the link) */
+.react-flow__edge.selected path,
+.react-flow__edge:focus path {
+  stroke: var(--interactive-accent) !important;
+  stroke-width: 3 !important;
+  filter: drop-shadow(
+    0 0 4px color-mix(in srgb, var(--interactive-accent) 60%, transparent)
+  );
+}
+
+.react-flow__edge:hover path {
+  stroke: color-mix(in srgb, var(--interactive-accent) 70%, var(--text-faint));
+  stroke-width: 2;
+}
+
 .gc-handle {
   opacity: 0;
   pointer-events: none;
+}
+
+/* chips get a small icon */
+.gc-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }

@@ -1,12 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ReactFlow,
+  ReactFlowProvider,
   Background,
   Node,
   Edge,
   Connection,
   applyNodeChanges,
+  applyEdgeChanges,
   NodeChange,
+  EdgeChange,
+  useReactFlow,
+  FinalConnectionState,
 } from "@xyflow/react";
 import { TFile, Notice } from "obsidian";
 import type { App } from "obsidian";
@@ -41,7 +46,26 @@ function addLinkToTagsLine(content: string, linkName: string): string {
   return `Tags: ${link}\n` + content;
 }
 
-export function GraphCanvas({
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Remove the first [[link]] (with optional alias) to `base` from content. */
+function removeWikilink(content: string, base: string): string {
+  const re = new RegExp(` ?\\[\\[${escapeRegex(base)}(\\|[^\\]]*)?\\]\\]`);
+  return content.replace(re, "");
+}
+
+function pairKey(a: string, b: string): string {
+  return a < b ? a + "|" + b : b + "|" + a;
+}
+
+interface Highlight {
+  nodes: Set<string>;
+  edges: Set<string>;
+}
+
+function CanvasInner({
   app,
   plugin,
 }: {
@@ -49,6 +73,7 @@ export function GraphCanvas({
   plugin: GraphChatPlugin;
 }) {
   const ctx = useMemo(() => ({ app, plugin }), [app, plugin]);
+  const { screenToFlowPosition } = useReactFlow();
 
   const initial = useMemo(() => {
     const graph = buildVaultGraph(app, plugin.settings);
@@ -76,14 +101,13 @@ export function GraphCanvas({
 
   const [nodes, setNodes] = useState<Node[]>(initial.nodes);
   const [edges, setEdges] = useState<Edge[]>(initial.edges);
+  const [highlight, setHighlight] = useState<Highlight | null>(null);
   const nodesRef = useRef(nodes);
   useEffect(() => {
     nodesRef.current = nodes;
   }, [nodes]);
 
-  // Live sync: when Obsidian finishes re-indexing links (new chat notes,
-  // renames, deletions, new wikilinks), merge changes in without disturbing
-  // the layout.
+  // Live sync with the vault (debounced on Obsidian's link re-index).
   useEffect(() => {
     let timer: number | null = null;
     const refresh = () => {
@@ -160,8 +184,22 @@ export function GraphCanvas({
     setEdges((es) => es.filter((e) => e.source !== nodeId && e.target !== nodeId));
   }, []);
 
+  const sessionUpdate = useCallback((nodeId: string, sessionId: string) => {
+    setNodes((ns) =>
+      ns.map((n) =>
+        n.id === nodeId ? { ...n, data: { ...n.data, currentSessionId: sessionId } } : n
+      )
+    );
+  }, []);
+
+  /** Fork: FRESH chat window whose session continues from the fork point. */
   const forkChat = useCallback(
-    (cardNodeId: string, side: BranchSide, snapshot: ForkSnapshot) => {
+    (
+      cardNodeId: string,
+      side: BranchSide,
+      snapshot: ForkSnapshot,
+      posOverride?: { x: number; y: number }
+    ) => {
       if (!snapshot.sessionId) {
         new Notice("Nothing to fork yet — send a message first.");
         return;
@@ -170,20 +208,25 @@ export function GraphCanvas({
         const anchor = ns.find((n) => n.id === cardNodeId);
         if (!anchor) return ns;
         const chatId = `chat-${++chatCounter}`;
-        const x =
-          side === "left"
-            ? anchor.position.x - CARD_WIDTH - 140
-            : anchor.position.x + CARD_WIDTH + 140;
+        const position =
+          posOverride ??
+          {
+            x:
+              side === "left"
+                ? anchor.position.x - CARD_WIDTH - 140
+                : anchor.position.x + CARD_WIDTH + 140,
+            y: anchor.position.y + 60,
+          };
         const forkThread: ChatThread = {
           sourceNotePath: snapshot.sourceNotePath,
           sessionId: "",
           forkFromSessionId: snapshot.sessionId,
-          messages: snapshot.messages,
+          messages: [], // fresh window — context lives in the resumed session
         };
         const chatNode: Node = {
           id: chatId,
           type: "chatCard",
-          position: { x, y: anchor.position.y + 60 },
+          position,
           dragHandle: ".gc-drag-handle",
           data: {
             sourceNotePath: snapshot.sourceNotePath,
@@ -191,6 +234,7 @@ export function GraphCanvas({
             anchorNodeId: cardNodeId,
             onClose: closeChat,
             onFork: (() => {}) as any, // bound below
+            onSessionUpdate: (() => {}) as any,
           },
         };
         setEdges((es) => [
@@ -217,7 +261,8 @@ export function GraphCanvas({
       sourceNotePath: string,
       initialThread?: ChatThread,
       forceNew = false,
-      side: BranchSide = "right"
+      side: BranchSide = "right",
+      posOverride?: { x: number; y: number }
     ) => {
       setNodes((ns) => {
         const anchor = ns.find((n) => n.id === anchorNodeId);
@@ -239,14 +284,19 @@ export function GraphCanvas({
         if (dup) return ns;
 
         const chatId = `chat-${++chatCounter}`;
-        const x =
-          side === "left"
-            ? anchor.position.x - CARD_WIDTH - 180 - (siblings.length % 2) * 60
-            : anchor.position.x + 180 + (siblings.length % 2) * 60;
+        const position =
+          posOverride ??
+          {
+            x:
+              side === "left"
+                ? anchor.position.x - CARD_WIDTH - 180 - (siblings.length % 2) * 60
+                : anchor.position.x + 180 + (siblings.length % 2) * 60,
+            y: anchor.position.y - 60 + siblings.length * 120,
+          };
         const chatNode: Node = {
           id: chatId,
           type: "chatCard",
-          position: { x, y: anchor.position.y - 60 + siblings.length * 120 },
+          position,
           dragHandle: ".gc-drag-handle",
           data: {
             sourceNotePath,
@@ -254,6 +304,7 @@ export function GraphCanvas({
             anchorNodeId,
             onClose: closeChat,
             onFork: (() => {}) as any, // bound below
+            onSessionUpdate: (() => {}) as any,
           },
         };
         setEdges((es) => [
@@ -274,21 +325,17 @@ export function GraphCanvas({
     [closeChat]
   );
 
-  /** All saved chat threads whose Source links to this note. */
-  const threadsForNote = useCallback(
-    async (notePath: string): Promise<ChatThread[]> => {
-      const chatsPrefix = plugin.settings.chatsFolder + "/";
-      const chatFiles = app.vault
+  /** Saved chat notes (paths) whose Source links to this note. Synchronous. */
+  const chatNotesLinkedTo = useCallback(
+    (notePath: string): string[] => {
+      const prefix = plugin.settings.chatsFolder + "/";
+      return app.vault
         .getMarkdownFiles()
-        .filter((f) => f.path.startsWith(chatsPrefix));
-      const threads: ChatThread[] = [];
-      for (const f of chatFiles) {
-        const links = app.metadataCache.resolvedLinks[f.path] ?? {};
-        if (!(notePath in links)) continue;
-        const t = parseThread(f.path, await app.vault.cachedRead(f));
-        if (t) threads.push(t);
-      }
-      return threads;
+        .filter((f) => f.path.startsWith(prefix))
+        .filter(
+          (f) => notePath in (app.metadataCache.resolvedLinks[f.path] ?? {})
+        )
+        .map((f) => f.path);
     },
     [app, plugin]
   );
@@ -315,32 +362,44 @@ export function GraphCanvas({
             forkChat(nodeId, side, {
               sourceNotePath: thread.sourceNotePath,
               sessionId: thread.sessionId,
-              messages: thread.messages,
             });
           } else {
             spawnCard(nodeId, thread.sourceNotePath, thread, false, side);
           }
         });
-      } else if (!forceNew) {
-        // plain click on a note: reopen ALL its saved chats; none → new chat
-        void threadsForNote(notePath).then((threads) => {
-          if (threads.length === 0) {
-            spawnCard(nodeId, notePath, undefined, false, side);
-          } else {
-            threads.forEach((t, i) =>
-              spawnCard(nodeId, t.sourceNotePath, t, false, i % 2 ? "left" : side)
-            );
-          }
-        });
-      } else {
-        spawnCard(nodeId, notePath, undefined, true, side);
+        return;
       }
+
+      if (!forceNew) {
+        // plain click: if the note has chats, LIGHT THEM UP instead of opening
+        const chatNotes = chatNotesLinkedTo(notePath);
+        const openCards = nodesRef.current.filter(
+          (n) =>
+            n.type === "chatCard" && (n.data as any).anchorNodeId === nodeId
+        );
+        if (chatNotes.length > 0 || openCards.length > 0) {
+          const hNodes = new Set<string>([
+            nodeId,
+            ...chatNotes,
+            ...openCards.map((n) => n.id),
+          ]);
+          const hEdges = new Set<string>([
+            ...chatNotes.map((c) => pairKey(nodeId, c)),
+            ...openCards.map((n) => `${nodeId}->${n.id}`),
+          ]);
+          setHighlight({ nodes: hNodes, edges: hEdges });
+          return;
+        }
+        spawnCard(nodeId, notePath, undefined, false, side);
+        return;
+      }
+
+      spawnCard(nodeId, notePath, undefined, true, side);
     },
-    [app, spawnCard, forkChat, threadsForNote]
+    [app, spawnCard, forkChat, chatNotesLinkedTo]
   );
 
-  // Drag a “+” onto another node → create a real [[wikilink]] in the note's
-  // Tags: line. Drop onto a chat card → attach the note as chat context.
+  // Drag a “+” onto another node → wikilink (Tags: line) or chat context.
   const onConnect = useCallback(
     (conn: Connection) => {
       if (!conn.source || !conn.target || conn.source === conn.target) return;
@@ -349,11 +408,10 @@ export function GraphCanvas({
       const tgt = ns.find((n) => n.id === conn.target);
       if (!src || !tgt) return;
 
-      // dropping on (or dragging from) a chat card → context link
       const card = tgt.type === "chatCard" ? tgt : src.type === "chatCard" ? src : null;
       const other = card === tgt ? src : tgt;
       if (card) {
-        if (other.type === "chatCard") return; // card↔card: no-op
+        if (other.type === "chatCard") return;
         const notePath = (other.data as any).path as string;
         setNodes((all) =>
           all.map((n) =>
@@ -386,12 +444,10 @@ export function GraphCanvas({
         return;
       }
 
-      // node ↔ node → write a real wikilink into the Tags: line
       const sKind = (src.data as any).kind as VaultNodeKind;
       const tKind = (tgt.data as any).kind as VaultNodeKind;
       if (sKind === "tag" && tKind === "tag") return;
 
-      // the tag link goes INTO the note; note→note links into the dragged-from note
       let fileNode = src;
       let linkNode = tgt;
       if (sKind === "tag" && tKind !== "tag") {
@@ -409,31 +465,172 @@ export function GraphCanvas({
         .process(file, (content) => addLinkToTagsLine(content, linkBase))
         .then(() => {
           new Notice(`Added [[${linkBase}]] to ${file.basename} (Tags:)`);
-          // real edge appears via the metadataCache refresh
         });
     },
     [app]
   );
 
+  // Drop a “+” drag on EMPTY canvas → open a chat/fork card right there.
+  const onConnectEnd = useCallback(
+    (event: MouseEvent | TouchEvent, state: FinalConnectionState) => {
+      if (state.isValid) return; // landed on a node — onConnect handled it
+      const fromNode = state.fromNode;
+      const handleId = state.fromHandle?.id ?? "";
+      if (!fromNode || !/^(plus|fork)-/.test(handleId)) return;
+
+      const clientX =
+        "clientX" in event ? event.clientX : event.changedTouches?.[0]?.clientX;
+      const clientY =
+        "clientY" in event ? event.clientY : event.changedTouches?.[0]?.clientY;
+      if (clientX === undefined || clientY === undefined) return;
+
+      const pos = screenToFlowPosition({ x: clientX, y: clientY });
+      const side: BranchSide = handleId.endsWith("left") ? "left" : "right";
+      // place the card so its connecting edge lands near the drop point
+      const cardPos = {
+        x: side === "left" ? pos.x - CARD_WIDTH + 20 : pos.x - 20,
+        y: pos.y - 30,
+      };
+
+      const data: any = fromNode.data ?? {};
+      if (fromNode.type === "chatCard") {
+        const sessionId =
+          (data.currentSessionId as string) ??
+          (data.initialThread?.sessionId as string) ??
+          "";
+        forkChat(
+          fromNode.id,
+          side,
+          {
+            sourceNotePath: data.sourceNotePath,
+            sessionId,
+          },
+          cardPos
+        );
+        return;
+      }
+      const kind = data.kind as VaultNodeKind;
+      if (kind === "tag") return;
+      if (kind === "chat") {
+        const file = app.vault.getAbstractFileByPath(data.path);
+        if (!(file instanceof TFile)) return;
+        void app.vault.cachedRead(file).then((content) => {
+          const thread = parseThread(data.path, content);
+          if (!thread) return;
+          forkChat(
+            fromNode.id,
+            side,
+            {
+              sourceNotePath: thread.sourceNotePath,
+              sessionId: thread.sessionId,
+            },
+            cardPos
+          );
+        });
+        return;
+      }
+      spawnCard(fromNode.id, data.path, undefined, true, side, cardPos);
+    },
+    [app, spawnCard, forkChat, screenToFlowPosition]
+  );
+
+  // Deleting a selected graph edge removes the [[wikilink]] from the note.
+  const onEdgesDelete = useCallback(
+    (deleted: Edge[]) => {
+      for (const e of deleted) {
+        if (e.className !== "gc-edge") continue;
+        const srcFile = app.vault.getAbstractFileByPath(e.source);
+        const tgtFile = app.vault.getAbstractFileByPath(e.target);
+        const srcBase = e.source.replace(/\.md$/, "").split("/").pop()!;
+        const tgtBase = e.target.replace(/\.md$/, "").split("/").pop()!;
+        void (async () => {
+          let removed = false;
+          if (srcFile instanceof TFile) {
+            const c = await app.vault.cachedRead(srcFile);
+            if (removeWikilink(c, tgtBase) !== c) {
+              await app.vault.process(srcFile, (x) => removeWikilink(x, tgtBase));
+              new Notice(`Removed [[${tgtBase}]] from ${srcFile.basename}`);
+              removed = true;
+            }
+          }
+          if (!removed && tgtFile instanceof TFile) {
+            const c = await app.vault.cachedRead(tgtFile);
+            if (removeWikilink(c, srcBase) !== c) {
+              await app.vault.process(tgtFile, (x) => removeWikilink(x, srcBase));
+              new Notice(`Removed [[${srcBase}]] from ${tgtFile.basename}`);
+              removed = true;
+            }
+          }
+          if (!removed) new Notice("Link not found in either note.");
+        })();
+      }
+    },
+    [app]
+  );
+
+  // origin notes of open chat cards get a distinct look
+  const activeAnchors = useMemo(() => {
+    const s = new Set<string>();
+    for (const n of nodes) {
+      if (n.type === "chatCard" && (n.data as any).anchorNodeId) {
+        s.add((n.data as any).anchorNodeId as string);
+      }
+    }
+    return s;
+  }, [nodes]);
+
   const boundNodes = useMemo(
     () =>
-      nodes.map((n) => {
+      nodes.map((rawNode) => {
+        const n = { ...rawNode, deletable: false }; // Delete key is for edges only
+        const classes: string[] = [];
+        if (highlight?.nodes.has(n.id)) classes.push("gc-glow");
+        if (n.type !== "chatCard" && activeAnchors.has(n.id))
+          classes.push("gc-anchor-active");
+        const className = classes.join(" ") || undefined;
         if (n.type === "note") {
-          return { ...n, data: { ...n.data, onStartChat: startChat } };
+          return { ...n, className, data: { ...n.data, onStartChat: startChat } };
         }
         if (n.type === "chatCard") {
           return {
             ...n,
-            data: { ...n.data, onClose: closeChat, onFork: forkChat },
+            className,
+            data: {
+              ...n.data,
+              onClose: closeChat,
+              onFork: forkChat,
+              onSessionUpdate: sessionUpdate,
+            },
           };
         }
-        return n;
+        return { ...n, className };
       }),
-    [nodes, startChat, closeChat, forkChat]
+    [nodes, startChat, closeChat, forkChat, sessionUpdate, highlight, activeAnchors]
+  );
+
+  const displayEdges = useMemo(
+    () =>
+      highlight
+        ? edges.map((e) =>
+            highlight.edges.has(e.id)
+              ? {
+                  ...e,
+                  className: (e.className ?? "") + " gc-edge-glow",
+                  animated: true,
+                }
+              : e
+          )
+        : edges,
+    [edges, highlight]
   );
 
   const onNodesChange = useCallback(
     (changes: NodeChange[]) => setNodes((ns) => applyNodeChanges(changes, ns)),
+    []
+  );
+
+  const onEdgesChange = useCallback(
+    (changes: EdgeChange[]) => setEdges((es) => applyEdgeChanges(changes, es)),
     []
   );
 
@@ -442,11 +639,16 @@ export function GraphCanvas({
       <div className="gc-canvas-wrap">
         <ReactFlow
           nodes={boundNodes}
-          edges={edges}
+          edges={displayEdges}
           nodeTypes={nodeTypes}
           onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          onEdgesDelete={onEdgesDelete}
           onConnect={onConnect}
+          onConnectEnd={onConnectEnd}
+          onPaneClick={() => setHighlight(null)}
           connectOnClick={false}
+          deleteKeyCode={["Backspace", "Delete"]}
           fitView
           minZoom={0.05}
           maxZoom={2.5}
@@ -456,5 +658,13 @@ export function GraphCanvas({
         </ReactFlow>
       </div>
     </PluginContext.Provider>
+  );
+}
+
+export function GraphCanvas(props: { app: App; plugin: GraphChatPlugin }) {
+  return (
+    <ReactFlowProvider>
+      <CanvasInner {...props} />
+    </ReactFlowProvider>
   );
 }
