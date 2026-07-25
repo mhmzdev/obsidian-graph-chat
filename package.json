@@ -1,0 +1,34 @@
+{
+  "name": "obsidian-graph-chat",
+  "version": "0.1.0",
+  "description": "Extended graph view for Obsidian — vault graph where notes expand into Claude Code chat cards",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "node esbuild.config.mjs production",
+    "deploy": "npm run build && node deploy.mjs"
+  },
+  "keywords": [
+    "obsidian",
+    "claude",
+    "graph"
+  ],
+  "author": "Hamza",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/d3-force": "^3.0.10",
+    "@types/node": "^22.0.0",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "builtin-modules": "^4.0.0",
+    "esbuild": "^0.24.0",
+    "obsidian": "latest",
+    "typescript": "^5.6.0"
+  },
+  "dependencies": {
+    "@xyflow/react": "^12.3.0",
+    "d3-force": "^3.0.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  }
+}

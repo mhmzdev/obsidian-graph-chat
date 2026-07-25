@@ -1,0 +1,9 @@
+{
+  "id": "graph-chat",
+  "name": "Graph Chat (Prototype)",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Extended graph view — vault graph where notes expand into Claude Code chat cards. Chats persist as real notes.",
+  "author": "Hamza",
+  "isDesktopOnly": true
+}

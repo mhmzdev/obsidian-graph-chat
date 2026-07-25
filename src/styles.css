@@ -1,0 +1,212 @@
+/* ===== Graph Chat prototype ===== */
+
+.graph-chat-root {
+  padding: 0 !important;
+  overflow: hidden;
+}
+
+.gc-canvas-wrap {
+  width: 100%;
+  height: 100%;
+  background: var(--background-primary);
+}
+
+/* --- note nodes (chattable) --- */
+.gc-note-node {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+}
+
+.gc-note-circle {
+  border-radius: 50%;
+  background: var(--text-muted);
+  transition: background 0.15s ease, transform 0.15s ease;
+  cursor: grab;
+}
+
+.gc-note-node:hover .gc-note-circle {
+  background: var(--interactive-accent);
+  transform: scale(1.08);
+}
+
+.gc-note-label {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+  max-width: 140px;
+  text-align: center;
+  line-height: 1.2;
+}
+
+.gc-note-actions {
+  position: absolute;
+  top: -14px;
+  right: -14px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.gc-note-node:hover .gc-note-actions {
+  opacity: 1;
+}
+
+.gc-chat-btn {
+  border: none;
+  background: var(--interactive-accent);
+  border-radius: 50%;
+  width: 26px;
+  height: 26px;
+  font-size: 13px;
+  cursor: pointer;
+  box-shadow: var(--shadow-s);
+}
+
+/* --- tag hub nodes (ToC, not chattable) --- */
+.gc-tag-pill {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-size: 10px;
+  background: var(--background-modifier-border);
+  color: var(--text-faint);
+  border: 1px solid var(--background-modifier-border-hover);
+}
+
+/* --- chat card nodes --- */
+.gc-chat-card {
+  width: 380px;
+  height: 420px;
+  display: flex;
+  flex-direction: column;
+  background: var(--background-primary);
+  border: 1px solid var(--interactive-accent);
+  border-radius: 10px;
+  box-shadow: var(--shadow-l);
+  overflow: hidden;
+}
+
+.gc-chat-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: var(--background-secondary);
+  border-bottom: 1px solid var(--background-modifier-border);
+  cursor: grab;
+}
+
+.gc-chat-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-normal);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gc-close-btn {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.gc-chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.gc-chat-empty {
+  color: var(--text-faint);
+  font-size: 12px;
+  text-align: center;
+  margin-top: 40%;
+}
+
+.gc-msg {
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.gc-msg-user {
+  align-self: flex-end;
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  max-width: 85%;
+}
+
+.gc-msg-assistant {
+  align-self: flex-start;
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  max-width: 95%;
+}
+
+.gc-msg-error {
+  background: rgba(220, 60, 60, 0.15);
+  color: var(--text-error);
+  font-size: 11px;
+}
+
+.gc-chat-input-row {
+  display: flex;
+  gap: 6px;
+  padding: 8px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.gc-chat-input {
+  flex: 1;
+  resize: none;
+  height: 44px;
+  font-size: 12.5px;
+  border-radius: 6px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  color: var(--text-normal);
+  padding: 6px 8px;
+}
+
+.gc-send-btn {
+  border: none;
+  border-radius: 6px;
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  cursor: pointer;
+  width: 36px;
+}
+
+.gc-send-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* --- edges & misc --- */
+.gc-edge path {
+  stroke: var(--background-modifier-border-hover);
+}
+
+.gc-edge-chat path {
+  stroke: var(--interactive-accent);
+  stroke-dasharray: 6 4;
+}
+
+.gc-handle {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.gc-minimap {
+  background: var(--background-secondary) !important;
+}
