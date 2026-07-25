@@ -10,6 +10,8 @@ export interface ChatThread {
   sessionId: string;
   messages: ChatMessage[];
   filePath?: string; // set once persisted
+  /** fork parent — first send resumes this session with --fork-session */
+  forkFromSessionId?: string;
 }
 
 function slug(s: string): string {

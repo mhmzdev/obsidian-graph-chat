@@ -22,9 +22,10 @@ export interface NoteNodeData {
 
 /**
  * Rounded card with the note title inside.
- * Single click → open chat (reopens the thread for saved chat notes).
- * Double click → open the note. Hover “+” on either edge → branch a new
- * chat out of that side.
+ * Single click → open chat(s). Double click → open the note.
+ * The “+” on each edge is a React Flow handle: CLICK it to branch a chat,
+ * DRAG it to another node to create a real [[wikilink]] between the notes.
+ * The whole card is a drop target while a connection is being dragged.
  */
 export function NoteNode({ id, data }: NodeProps) {
   const d = data as NoteNodeData;
@@ -43,10 +44,13 @@ export function NoteNode({ id, data }: NodeProps) {
     }
   };
 
-  const plusBtn = (side: BranchSide) => (
-    <button
-      className={`gc-plus-btn gc-plus-${side}`}
-      title="Branch a new chat from this side"
+  const plusHandle = (side: BranchSide) => (
+    <Handle
+      type="source"
+      id={`plus-${side}`}
+      position={side === "left" ? Position.Left : Position.Right}
+      className={`gc-plus-handle gc-plus-${side}`}
+      title="Click: branch a chat · Drag: link to another node"
       onClick={(e) => {
         e.stopPropagation();
         cancelPendingClick();
@@ -54,25 +58,22 @@ export function NoteNode({ id, data }: NodeProps) {
       }}
       onDoubleClick={(e) => e.stopPropagation()}
     >
-      +
-    </button>
+      <span className="gc-plus-glyph">+</span>
+    </Handle>
   );
 
   return (
     <div className="gc-note-node">
+      {/* invisible anchors for regular graph edges */}
       <Handle type="source" position={Position.Right} className="gc-handle" />
       <Handle type="target" position={Position.Left} className="gc-handle" />
+      {/* full-card drop target, active only while a connection is dragged */}
       <Handle
-        type="source"
-        id="plus-left"
+        type="target"
+        id="drop"
         position={Position.Left}
-        className="gc-handle"
-      />
-      <Handle
-        type="source"
-        id="plus-right"
-        position={Position.Right}
-        className="gc-handle"
+        className="gc-drop-target"
+        isConnectableStart={false}
       />
       <div
         className={`gc-note-card${d.kind === "chat" ? " gc-kind-chat" : ""}${
@@ -92,8 +93,8 @@ export function NoteNode({ id, data }: NodeProps) {
         title={`${d.path}\nclick: chat · double-click: open note`}
       >
         <span className="gc-note-title">{d.label}</span>
-        {plusBtn("left")}
-        {plusBtn("right")}
+        {plusHandle("left")}
+        {plusHandle("right")}
       </div>
     </div>
   );

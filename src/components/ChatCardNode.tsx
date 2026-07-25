@@ -4,21 +4,30 @@ import { FileSystemAdapter, MarkdownRenderer, Component } from "obsidian";
 import { usePluginCtx } from "./PluginContext";
 import { runPrompt } from "../chat/claudeSession";
 import { saveThread, ChatThread, ChatMessage } from "../chat/persistence";
+import type { BranchSide } from "./NoteNode";
+
+export interface ForkSnapshot {
+  sourceNotePath: string;
+  sessionId: string;
+  messages: ChatMessage[];
+}
 
 export interface ChatCardData {
   sourceNotePath: string;
   /** present when reopening a saved chat note — resumes its session */
   initialThread?: ChatThread;
   anchorNodeId?: string;
+  /** vault paths dropped onto this card as extra context */
+  linkedNotes?: string[];
   onClose: (nodeId: string) => void;
+  onFork: (nodeId: string, side: BranchSide, snapshot: ForkSnapshot) => void;
   [key: string]: unknown;
 }
 
 const MODELS: { label: string; value: string }[] = [
-  { label: "Default", value: "" },
+  { label: "Sonnet", value: "sonnet" },
   { label: "Fable 5", value: "claude-fable-5" },
   { label: "Opus", value: "opus" },
-  { label: "Sonnet", value: "sonnet" },
   { label: "Haiku", value: "haiku" },
 ];
 
@@ -66,13 +75,18 @@ export function ChatCardNode({ id, data }: NodeProps) {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [model, setModel] = useState("");
+  const [model, setModel] = useState("sonnet");
+  const [menuOpen, setMenuOpen] = useState(false);
   const [savedPath, setSavedPath] = useState<string | null>(
     threadRef.current.filePath ?? null
   );
   const cancelRef = useRef<(() => void) | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const consumedLinksRef = useRef(0);
+
+  const isFork = !!threadRef.current.forkFromSessionId && !threadRef.current.sessionId;
+  const linkedNotes = (d.linkedNotes ?? []) as string[];
 
   const sourceName =
     threadRef.current.sourceNotePath.replace(/\.md$/, "").split("/").pop() ??
@@ -113,15 +127,25 @@ export function ChatCardNode({ id, data }: NodeProps) {
     setBusy(true);
 
     const thread = threadRef.current;
-    const isFirst = thread.messages.length === 0;
+    const isFirstEver = thread.messages.length === 0;
     thread.messages.push({ role: "user", text });
     setMessages([...thread.messages]);
-    void persist(); // the thread exists in Chats/ from message one
+    void persist();
 
-    // First turn: point Claude at the source note. After that --resume keeps context.
-    const prompt = isFirst
-      ? `You are chatting inside an Obsidian vault. This conversation is anchored to the note "${thread.sourceNotePath}". Read that note first, follow its wikilinks if helpful, then answer concisely.\n\nQuestion: ${text}`
-      : text;
+    // Build the prompt: anchor preamble on the very first message of a fresh
+    // thread; freshly-dropped context notes get injected once.
+    let prefix = "";
+    if (isFirstEver && !thread.forkFromSessionId) {
+      prefix += `You are chatting inside an Obsidian vault. This conversation is anchored to the note "${thread.sourceNotePath}". Read that note first, follow its wikilinks if helpful, then answer concisely.\n\n`;
+    }
+    const freshLinks = linkedNotes.slice(consumedLinksRef.current);
+    if (freshLinks.length > 0) {
+      prefix += `Also read these vault notes as additional context before answering: ${freshLinks
+        .map((p) => `"${p}"`)
+        .join(", ")}.\n\n`;
+      consumedLinksRef.current = linkedNotes.length;
+    }
+    const prompt = prefix ? prefix + "Question: " + text : text;
 
     const adapter = app.vault.adapter;
     const vaultPath =
@@ -136,14 +160,15 @@ export function ChatCardNode({ id, data }: NodeProps) {
       vaultPath,
       prompt,
       model: model || undefined,
-      resumeSessionId: thread.sessionId || undefined,
+      resumeSessionId: thread.sessionId || thread.forkFromSessionId || undefined,
+      forkSession: !thread.sessionId && !!thread.forkFromSessionId,
       onText: (chunk) => {
         assistantMsg.text += chunk;
         setMessages([...thread.messages]);
       },
       onDone: async (sessionId, fullText) => {
         assistantMsg.text = fullText || assistantMsg.text;
-        thread.sessionId = sessionId;
+        thread.sessionId = sessionId; // fork gets its own id here
         setMessages([...thread.messages]);
         setBusy(false);
         await persist();
@@ -162,6 +187,28 @@ export function ChatCardNode({ id, data }: NodeProps) {
     if (file) app.workspace.getLeaf("tab").openFile(file as any);
   };
 
+  const forkHandle = (side: BranchSide) => (
+    <Handle
+      type="source"
+      id={`fork-${side}`}
+      position={side === "left" ? Position.Left : Position.Right}
+      className={`gc-plus-handle gc-plus-${side} gc-fork-handle`}
+      title="Click: fork this conversation · Drag: link a note into this chat"
+      onClick={(e) => {
+        e.stopPropagation();
+        d.onFork(id, side, {
+          sourceNotePath: threadRef.current.sourceNotePath,
+          sessionId: threadRef.current.sessionId,
+          messages: threadRef.current.messages.map((m) => ({ ...m })),
+        });
+      }}
+    >
+      <span className="gc-plus-glyph">+</span>
+    </Handle>
+  );
+
+  const currentModel = MODELS.find((m) => m.value === model) ?? MODELS[0];
+
   return (
     <div className="gc-chat-card nowheel">
       <Handle type="target" position={Position.Left} className="gc-handle" />
@@ -171,8 +218,20 @@ export function ChatCardNode({ id, data }: NodeProps) {
         position={Position.Right}
         className="gc-handle"
       />
+      <Handle
+        type="target"
+        id="drop"
+        position={Position.Left}
+        className="gc-drop-target"
+        isConnectableStart={false}
+      />
+      {forkHandle("left")}
+      {forkHandle("right")}
       <div className="gc-chat-header gc-drag-handle">
-        <span className="gc-chat-title">💬 {sourceName}</span>
+        <span className="gc-chat-title">
+          💬 {sourceName}
+          {isFork && <span className="gc-fork-badge">fork</span>}
+        </span>
         <span className="gc-header-btns">
           <button
             className="gc-header-btn"
@@ -216,6 +275,15 @@ export function ChatCardNode({ id, data }: NodeProps) {
         ))}
         {error && <div className="gc-msg gc-msg-error">{error}</div>}
       </div>
+      {linkedNotes.length > 0 && (
+        <div className="gc-chips">
+          {linkedNotes.map((p) => (
+            <span key={p} className="gc-chip" title={p}>
+              📎 {p.replace(/\.md$/, "").split("/").pop()}
+            </span>
+          ))}
+        </div>
+      )}
       <div className="gc-chat-input-row">
         <textarea
           ref={inputRef}
@@ -245,19 +313,37 @@ export function ChatCardNode({ id, data }: NodeProps) {
         </button>
       </div>
       <div className="gc-chat-footer">
-        <select
-          className="gc-model-select"
-          value={model}
-          disabled={busy}
-          onChange={(e) => setModel(e.target.value)}
-          title="Model for this chat"
+        <div
+          className="gc-model-wrap"
+          onMouseLeave={() => setMenuOpen(false)}
         >
-          {MODELS.map((m) => (
-            <option key={m.value} value={m.value}>
-              {m.label}
-            </option>
-          ))}
-        </select>
+          {menuOpen && (
+            <div className="gc-model-menu">
+              {MODELS.map((m) => (
+                <div
+                  key={m.value}
+                  className={`gc-model-item${
+                    m.value === model ? " gc-model-active" : ""
+                  }`}
+                  onClick={() => {
+                    setModel(m.value);
+                    setMenuOpen(false);
+                  }}
+                >
+                  <span>{m.label}</span>
+                  {m.value === model && <span className="gc-model-check">✓</span>}
+                </div>
+              ))}
+            </div>
+          )}
+          <button
+            className="gc-model-btn"
+            disabled={busy}
+            onClick={() => setMenuOpen((o) => !o)}
+          >
+            {currentModel.label} <span className="gc-model-caret">▾</span>
+          </button>
+        </div>
       </div>
     </div>
   );

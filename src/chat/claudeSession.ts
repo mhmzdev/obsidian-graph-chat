@@ -6,6 +6,8 @@ export interface RunPromptOptions {
   prompt: string;
   model?: string; // CLI model alias/id; omit for the user's default
   resumeSessionId?: string;
+  /** with resumeSessionId: fork into a NEW session instead of continuing */
+  forkSession?: boolean;
   onText: (text: string) => void; // called per assistant message chunk
   onDone: (sessionId: string, fullText: string) => void;
   onError: (err: string) => void;
@@ -40,6 +42,7 @@ export function runPrompt(opts: RunPromptOptions): () => void {
   }
   if (opts.resumeSessionId) {
     args.push("--resume", opts.resumeSessionId);
+    if (opts.forkSession) args.push("--fork-session");
   }
 
   const child = spawn(opts.claudePath, args, {

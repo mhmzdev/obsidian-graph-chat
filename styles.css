@@ -638,20 +638,21 @@ svg.react-flow__connectionline {
   background: var(--background-primary);
 }
 
-/* --- note nodes (chattable) --- */
+/* ---------- note nodes (chattable) ---------- */
+
 .gc-note-node {
   position: relative;
 }
 
 .gc-note-card {
   position: relative;
-  max-width: 170px;
+  max-width: 175px;
   min-width: 90px;
-  padding: 8px 14px;
-  border-radius: 10px;
+  padding: 9px 16px;
+  border-radius: 12px;
   background: var(--background-primary);
   border: 1.5px solid color-mix(in srgb, var(--text-muted) 55%, transparent);
-  box-shadow: var(--shadow-s);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
   transition: border-color 0.15s ease, transform 0.15s ease,
     box-shadow 0.15s ease;
   cursor: grab;
@@ -661,7 +662,9 @@ svg.react-flow__connectionline {
 .gc-note-card:hover {
   border-color: var(--interactive-accent);
   transform: scale(1.04);
-  box-shadow: var(--shadow-s);
+  box-shadow: 0 0 0 1px
+      color-mix(in srgb, var(--interactive-accent) 40%, transparent),
+    0 6px 18px rgba(0, 0, 0, 0.18);
 }
 
 .gc-note-title {
@@ -671,55 +674,120 @@ svg.react-flow__connectionline {
   word-break: break-word;
 }
 
-/* hubs (many links) stand out a little */
 .gc-note-card.gc-hub {
   border-width: 2px;
   font-weight: 600;
 }
 
-/* saved chat notes get an accent tint in the graph */
 .gc-note-card.gc-kind-chat {
-  border-color: var(--interactive-accent);
+  border-color: color-mix(in srgb, var(--interactive-accent) 70%, transparent);
   background: color-mix(
     in srgb,
-    var(--interactive-accent) 18%,
-    var(--background-secondary)
+    var(--interactive-accent) 14%,
+    var(--background-primary)
   );
 }
 
-/* branch-a-new-chat buttons, appear on hover at the card's edges */
-.gc-plus-btn {
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  border: none;
-  background: var(--interactive-accent);
-  color: var(--text-on-accent);
-  font-size: 16px;
-  line-height: 1;
-  cursor: pointer;
+/* ---------- “+” handles: click = branch chat, drag = draw a link ---------- */
+
+.gc-plus-handle {
+  width: 26px !important;
+  height: 26px !important;
+  min-width: 26px !important;
+  min-height: 26px !important;
+  border-radius: 50% !important;
+  background: var(--interactive-accent) !important;
+  border: 2px solid var(--background-primary) !important;
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
   opacity: 0;
-  transition: opacity 0.15s ease;
-  box-shadow: var(--shadow-s);
-  padding: 0;
+  transition: opacity 0.15s ease, transform 0.1s ease;
+  cursor: pointer !important;
+  z-index: 6;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
 }
 
-.gc-plus-right {
-  right: -13px;
+.gc-plus-handle:hover {
+  transform: translateY(-50%) scale(1.15) !important;
+}
+
+.gc-plus-glyph {
+  color: var(--text-on-accent);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1;
+  pointer-events: none;
 }
 
 .gc-plus-left {
-  left: -13px;
+  left: -14px !important;
 }
 
-.gc-note-card:hover .gc-plus-btn {
+.gc-plus-right {
+  right: -14px !important;
+  left: auto !important;
+}
+
+.gc-plus-mini {
+  width: 18px !important;
+  height: 18px !important;
+  min-width: 18px !important;
+  min-height: 18px !important;
+}
+
+.gc-plus-mini .gc-plus-glyph {
+  font-size: 11px;
+}
+
+.gc-note-card:hover .gc-plus-handle,
+.gc-tag-node:hover .gc-plus-handle,
+.gc-chat-card:hover .gc-fork-handle {
   opacity: 1;
 }
 
-/* --- tag hub nodes (ToC, not chattable) --- */
+/* ---------- drop targets (whole node glows while you drag a link) ---------- */
+
+.gc-drop-target {
+  position: absolute !important;
+  inset: 0 !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  transform: none !important;
+  border: none !important;
+  border-radius: 12px !important;
+  background: transparent !important;
+  opacity: 1;
+  pointer-events: none !important;
+  z-index: 5;
+}
+
+.react-flow:has(.react-flow__handle.connectingfrom) .gc-drop-target {
+  pointer-events: all !important;
+}
+
+.gc-drop-target.connectingto {
+  background: color-mix(
+    in srgb,
+    var(--interactive-accent) 14%,
+    transparent
+  ) !important;
+  box-shadow: 0 0 0 2px var(--interactive-accent);
+}
+
+.react-flow__connection-path {
+  stroke: var(--interactive-accent);
+  stroke-width: 2;
+}
+
+/* ---------- tag hub nodes (ToC, not chattable) ---------- */
+
+.gc-tag-node {
+  position: relative;
+}
+
 .gc-tag-pill {
   display: inline-block;
   padding: 2px 10px;
@@ -730,26 +798,34 @@ svg.react-flow__connectionline {
   border: 1px solid var(--background-modifier-border-hover);
 }
 
-/* --- chat card nodes --- */
+/* ---------- chat card nodes ---------- */
+
 .gc-chat-card {
+  position: relative;
   width: 380px;
-  height: 420px;
+  height: 440px;
   display: flex;
   flex-direction: column;
   background: var(--background-primary);
-  border: 1px solid var(--interactive-accent);
-  border-radius: 10px;
-  box-shadow: var(--shadow-l);
-  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--interactive-accent) 45%, transparent);
+  border-radius: 14px;
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.28),
+    0 0 0 1px color-mix(in srgb, var(--interactive-accent) 12%, transparent);
+  overflow: visible; /* let +/fork handles poke out */
 }
 
 .gc-chat-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 8px 12px;
-  background: var(--background-secondary);
+  padding: 9px 12px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--interactive-accent) 10%, var(--background-secondary)),
+    var(--background-secondary)
+  );
   border-bottom: 1px solid var(--background-modifier-border);
+  border-radius: 13px 13px 0 0;
   cursor: grab;
 }
 
@@ -760,6 +836,23 @@ svg.react-flow__connectionline {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.gc-fork-badge {
+  font-size: 9px;
+  font-weight: 600;
+  padding: 1px 7px;
+  margin-left: 7px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--interactive-accent) 20%, transparent);
+  color: var(--interactive-accent);
+  vertical-align: middle;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.gc-fork-handle {
+  top: 50% !important;
 }
 
 .gc-header-btns {
@@ -788,13 +881,42 @@ svg.react-flow__connectionline {
   cursor: default;
 }
 
+/* ---------- messages ---------- */
+
 .gc-chat-messages {
   flex: 1;
   overflow-y: auto;
-  padding: 10px;
+  padding: 12px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--text-muted) 30%, transparent)
+    transparent;
+}
+
+.gc-chat-messages::-webkit-scrollbar,
+.gc-chat-input::-webkit-scrollbar,
+.gc-md pre::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+.gc-chat-messages::-webkit-scrollbar-track,
+.gc-chat-input::-webkit-scrollbar-track,
+.gc-md pre::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.gc-chat-messages::-webkit-scrollbar-thumb,
+.gc-chat-input::-webkit-scrollbar-thumb,
+.gc-md pre::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--text-muted) 30%, transparent);
+  border-radius: 8px;
+}
+
+.gc-chat-messages::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--text-muted) 55%, transparent);
 }
 
 .gc-chat-empty {
@@ -802,41 +924,86 @@ svg.react-flow__connectionline {
   font-size: 12px;
   text-align: center;
   margin-top: 40%;
+  padding: 0 16px;
+  line-height: 1.5;
 }
 
 .gc-msg {
-  padding: 8px 10px;
-  border-radius: 8px;
+  padding: 9px 12px;
+  border-radius: 14px;
   font-size: 12.5px;
-  line-height: 1.45;
-  white-space: pre-wrap;
+  line-height: 1.5;
   word-break: break-word;
 }
 
 .gc-msg-user {
   align-self: flex-end;
-  background: var(--interactive-accent);
+  background: linear-gradient(
+    135deg,
+    var(--interactive-accent),
+    color-mix(in srgb, var(--interactive-accent) 72%, #7c5cff)
+  );
   color: var(--text-on-accent);
   max-width: 85%;
+  border-bottom-right-radius: 4px;
+  white-space: pre-wrap;
+  box-shadow: 0 2px 8px
+    color-mix(in srgb, var(--interactive-accent) 25%, transparent);
 }
 
 .gc-msg-assistant {
   align-self: flex-start;
   background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
   color: var(--text-normal);
   max-width: 95%;
+  border-bottom-left-radius: 4px;
 }
 
 .gc-msg-error {
-  background: rgba(220, 60, 60, 0.15);
+  background: rgba(220, 60, 60, 0.12);
+  border: 1px solid rgba(220, 60, 60, 0.35);
   color: var(--text-error);
   font-size: 11px;
 }
 
+.gc-typing {
+  color: var(--text-faint);
+  font-style: italic;
+}
+
+/* ---------- linked-context chips ---------- */
+
+.gc-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 6px 10px 0 10px;
+}
+
+.gc-chip {
+  font-size: 10px;
+  padding: 2px 9px;
+  border-radius: 10px;
+  background: color-mix(
+    in srgb,
+    var(--interactive-accent) 14%,
+    var(--background-secondary)
+  );
+  border: 1px solid color-mix(in srgb, var(--interactive-accent) 30%, transparent);
+  color: var(--text-muted);
+  white-space: nowrap;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---------- input row ---------- */
+
 .gc-chat-input-row {
   display: flex;
   gap: 6px;
-  padding: 8px 8px 4px 8px;
+  padding: 10px 10px 4px 10px;
   border-top: 1px solid var(--background-modifier-border);
   align-items: flex-end;
 }
@@ -849,17 +1016,23 @@ svg.react-flow__connectionline {
   overflow-y: auto;
   font-size: 12.5px;
   line-height: 1.4;
-  border-radius: 6px;
+  border-radius: 10px;
   background: var(--background-secondary);
   border: 1px solid var(--background-modifier-border);
   color: var(--text-normal);
-  padding: 8px;
+  padding: 8px 10px;
   box-sizing: border-box;
+  transition: border-color 0.15s ease;
+}
+
+.gc-chat-input:focus {
+  border-color: color-mix(in srgb, var(--interactive-accent) 60%, transparent);
+  outline: none;
 }
 
 .gc-send-btn {
   border: none;
-  border-radius: 6px;
+  border-radius: 10px;
   background: var(--interactive-accent);
   color: var(--text-on-accent);
   cursor: pointer;
@@ -869,10 +1042,15 @@ svg.react-flow__connectionline {
   display: flex;
   align-items: center;
   justify-content: center;
+  transition: filter 0.15s ease;
+}
+
+.gc-send-btn:hover:not(:disabled) {
+  filter: brightness(1.12);
 }
 
 .gc-send-btn:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: default;
 }
 
@@ -891,27 +1069,78 @@ svg.react-flow__connectionline {
   }
 }
 
-.gc-typing {
-  color: var(--text-faint);
-  font-style: italic;
-}
+/* ---------- footer / model picker ---------- */
 
 .gc-chat-footer {
   display: flex;
-  padding: 2px 8px 6px 8px;
+  padding: 3px 10px 8px 10px;
 }
 
-.gc-model-select {
-  font-size: 10.5px;
-  padding: 1px 4px;
-  border-radius: 5px;
+.gc-model-wrap {
+  position: relative;
+}
+
+.gc-model-btn {
+  font-size: 11px;
+  padding: 3px 9px;
+  border-radius: 7px;
   background: var(--background-secondary);
   border: 1px solid var(--background-modifier-border);
   color: var(--text-muted);
   cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
 }
 
-/* markdown inside assistant messages — compact */
+.gc-model-btn:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--interactive-accent) 50%, transparent);
+  color: var(--text-normal);
+}
+
+.gc-model-caret {
+  font-size: 8px;
+  opacity: 0.7;
+}
+
+.gc-model-menu {
+  position: absolute;
+  bottom: 28px;
+  left: 0;
+  min-width: 130px;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.3);
+  padding: 4px;
+  z-index: 30;
+}
+
+.gc-model-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  color: var(--text-normal);
+  cursor: pointer;
+}
+
+.gc-model-item:hover {
+  background: var(--background-modifier-hover);
+}
+
+.gc-model-active {
+  color: var(--interactive-accent);
+  font-weight: 600;
+}
+
+.gc-model-check {
+  font-size: 10px;
+}
+
+/* ---------- markdown inside assistant messages ---------- */
+
 .gc-md p,
 .gc-md ul,
 .gc-md ol {
@@ -940,8 +1169,8 @@ svg.react-flow__connectionline {
 .gc-md pre {
   overflow-x: auto;
   font-size: 11px;
-  padding: 6px;
-  border-radius: 6px;
+  padding: 7px;
+  border-radius: 8px;
 }
 
 .gc-md code {
@@ -952,14 +1181,20 @@ svg.react-flow__connectionline {
   color: var(--link-color, var(--interactive-accent));
 }
 
-/* --- edges & misc --- */
+/* ---------- edges & misc ---------- */
+
 .gc-edge path {
-  stroke: var(--background-modifier-border-hover);
+  stroke: color-mix(in srgb, var(--text-faint) 55%, transparent);
 }
 
 .gc-edge-chat path {
   stroke: var(--interactive-accent);
   stroke-dasharray: 6 4;
+}
+
+.gc-edge-link path {
+  stroke: color-mix(in srgb, var(--interactive-accent) 55%, transparent);
+  stroke-dasharray: 2 4;
 }
 
 .gc-handle {
