@@ -109,14 +109,34 @@ export function ChatCardNode({ id, data }: NodeProps) {
     });
   };
 
+  const openChatNote = () => {
+    if (!savedPath) return;
+    const file = app.vault.getAbstractFileByPath(savedPath);
+    if (file) app.workspace.getLeaf("tab").openFile(file as any);
+  };
+
   return (
-    <div className="gc-chat-card nowheel nodrag">
+    <div className="gc-chat-card nowheel">
       <Handle type="target" position={Position.Left} className="gc-handle" />
       <div className="gc-chat-header gc-drag-handle">
         <span className="gc-chat-title">💬 {sourceName}</span>
-        <button className="gc-close-btn" onClick={() => d.onClose(id)}>
-          ✕
-        </button>
+        <span className="gc-header-btns">
+          <button
+            className="gc-header-btn"
+            title={savedPath ? "Open chat note" : "Chat note appears after first message"}
+            disabled={!savedPath}
+            onClick={openChatNote}
+          >
+            📄
+          </button>
+          <button
+            className="gc-header-btn"
+            title="Close card (chat stays saved)"
+            onClick={() => d.onClose(id)}
+          >
+            ✕
+          </button>
+        </span>
       </div>
       <div className="gc-chat-messages" ref={scrollRef}>
         {messages.length === 0 && (
@@ -151,7 +171,6 @@ export function ChatCardNode({ id, data }: NodeProps) {
           ➤
         </button>
       </div>
-      {savedPath && <div className="gc-saved-path">saved · {savedPath}</div>}
     </div>
   );
 }

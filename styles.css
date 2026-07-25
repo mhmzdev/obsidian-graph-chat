@@ -640,37 +640,75 @@ svg.react-flow__connectionline {
 
 /* --- note nodes (chattable) --- */
 .gc-note-node {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
   position: relative;
 }
 
-.gc-note-circle {
-  border-radius: 50%;
-  background: var(--text-muted);
-  transition: background 0.15s ease, transform 0.15s ease;
+.gc-note-card {
+  position: relative;
+  max-width: 170px;
+  min-width: 90px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border-hover);
+  transition: border-color 0.15s ease, transform 0.15s ease,
+    box-shadow 0.15s ease;
   cursor: grab;
-}
-
-.gc-note-node:hover .gc-note-circle {
-  background: var(--interactive-accent);
-  transform: scale(1.08);
-}
-
-.gc-note-label {
-  margin-top: 4px;
-  font-size: 11px;
-  color: var(--text-muted);
-  max-width: 140px;
   text-align: center;
-  line-height: 1.2;
+}
+
+.gc-note-card:hover {
+  border-color: var(--interactive-accent);
+  transform: scale(1.04);
+  box-shadow: var(--shadow-s);
+}
+
+.gc-note-title {
+  font-size: 11.5px;
+  line-height: 1.3;
+  color: var(--text-normal);
+  word-break: break-word;
+}
+
+/* hubs (many links) stand out a little */
+.gc-note-card.gc-hub {
+  border-width: 2px;
+  font-weight: 600;
 }
 
 /* saved chat notes get an accent tint in the graph */
-.gc-note-circle.gc-kind-chat {
+.gc-note-card.gc-kind-chat {
+  border-color: var(--interactive-accent);
+  background: color-mix(
+    in srgb,
+    var(--interactive-accent) 18%,
+    var(--background-secondary)
+  );
+}
+
+/* branch-a-new-chat button, appears on hover at the card's right edge */
+.gc-plus-btn {
+  position: absolute;
+  right: -13px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: none;
   background: var(--interactive-accent);
-  opacity: 0.65;
+  color: var(--text-on-accent);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  box-shadow: var(--shadow-s);
+  padding: 0;
+}
+
+.gc-note-card:hover .gc-plus-btn {
+  opacity: 1;
 }
 
 /* --- tag hub nodes (ToC, not chattable) --- */
@@ -716,12 +754,30 @@ svg.react-flow__connectionline {
   text-overflow: ellipsis;
 }
 
-.gc-close-btn {
+.gc-header-btns {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+}
+
+.gc-header-btn {
   border: none;
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
   font-size: 12px;
+  padding: 2px 5px;
+  border-radius: 4px;
+}
+
+.gc-header-btn:hover:not(:disabled) {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.gc-header-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
 }
 
 .gc-chat-messages {
@@ -802,16 +858,6 @@ svg.react-flow__connectionline {
   cursor: default;
 }
 
-.gc-saved-path {
-  padding: 3px 10px;
-  font-size: 10px;
-  color: var(--text-faint);
-  border-top: 1px solid var(--background-modifier-border);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 /* --- edges & misc --- */
 .gc-edge path {
   stroke: var(--background-modifier-border-hover);
@@ -825,8 +871,4 @@ svg.react-flow__connectionline {
 .gc-handle {
   opacity: 0;
   pointer-events: none;
-}
-
-.gc-minimap {
-  background: var(--background-secondary) !important;
 }

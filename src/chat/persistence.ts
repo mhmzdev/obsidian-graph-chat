@@ -41,8 +41,12 @@ export async function saveThread(
   const firstUser = thread.messages.find((m) => m.role === "user")?.text ?? "chat";
 
   if (!thread.filePath) {
-    const name = `chat - ${slug(sourceBase)} - ${slug(firstUser) || "thread"}.md`;
-    thread.filePath = normalizePath(`${chatsFolder}/${name}`);
+    const base = `chat - ${slug(sourceBase)} - ${slug(firstUser) || "thread"}`;
+    let candidate = normalizePath(`${chatsFolder}/${base}.md`);
+    for (let i = 2; app.vault.getAbstractFileByPath(candidate); i++) {
+      candidate = normalizePath(`${chatsFolder}/${base} ${i}.md`);
+    }
+    thread.filePath = candidate;
   }
 
   const lines: string[] = [

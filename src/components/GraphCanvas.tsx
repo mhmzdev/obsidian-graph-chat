@@ -72,19 +72,26 @@ export function GraphCanvas({
     (
       anchorNodeId: string,
       sourceNotePath: string,
-      initialThread?: ChatThread
+      initialThread?: ChatThread,
+      forceNew = false
     ) => {
       setNodes((ns) => {
         const anchor = ns.find((n) => n.id === anchorNodeId);
         if (!anchor) return ns;
 
-        // one card per thread/note — don't stack duplicates
+        // reopened threads never duplicate; plain single-click doesn't stack —
+        // branching more chats off the same note goes through “+” (forceNew)
+        const siblings = ns.filter(
+          (n) =>
+            n.type === "chatCard" && (n.data as any).anchorNodeId === anchorNodeId
+        );
         const dup = ns.find(
           (n) =>
             n.type === "chatCard" &&
             (initialThread?.filePath
               ? (n.data as any).initialThread?.filePath === initialThread.filePath
-              : (n.data as any).sourceNotePath === sourceNotePath &&
+              : !forceNew &&
+                (n.data as any).sourceNotePath === sourceNotePath &&
                 !(n.data as any).initialThread)
         );
         if (dup) return ns;
@@ -94,11 +101,16 @@ export function GraphCanvas({
           id: chatId,
           type: "chatCard",
           position: {
-            x: anchor.position.x + 120,
-            y: anchor.position.y - 60,
+            x: anchor.position.x + 180 + (siblings.length % 2) * 60,
+            y: anchor.position.y - 60 + siblings.length * 120,
           },
           dragHandle: ".gc-drag-handle",
-          data: { sourceNotePath, initialThread, onClose: closeChat },
+          data: {
+            sourceNotePath,
+            initialThread,
+            anchorNodeId,
+            onClose: closeChat,
+          },
         };
         setEdges((es) => [
           ...es,
@@ -117,7 +129,12 @@ export function GraphCanvas({
   );
 
   const startChat = useCallback(
-    (notePath: string, nodeId: string, kind: VaultNodeKind) => {
+    (
+      notePath: string,
+      nodeId: string,
+      kind: VaultNodeKind,
+      forceNew = false
+    ) => {
       if (kind === "chat") {
         // saved chat note → reopen the thread, resume its session
         const file = app.vault.getAbstractFileByPath(notePath);
@@ -131,7 +148,7 @@ export function GraphCanvas({
           spawnCard(nodeId, thread.sourceNotePath, thread);
         });
       } else {
-        spawnCard(nodeId, notePath);
+        spawnCard(nodeId, notePath, undefined, forceNew);
       }
     },
     [app, spawnCard]

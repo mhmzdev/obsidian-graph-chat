@@ -32,12 +32,12 @@ export function layoutGraph(graph: VaultGraph): Positions {
       "link",
       forceLink(simLinks)
         .id((d: any) => d.id)
-        .distance(140)
-        .strength(0.4)
+        .distance(260)
+        .strength(0.3)
     )
-    .force("charge", forceManyBody().strength(-320))
+    .force("charge", forceManyBody().strength(-900))
     .force("center", forceCenter(0, 0))
-    .force("collide", forceCollide(46))
+    .force("collide", forceCollide(110))
     .stop();
 
   const ticks = Math.min(
