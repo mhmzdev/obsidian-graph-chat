@@ -3,16 +3,17 @@ import {
   ReactFlow,
   Background,
   Controls,
-  MiniMap,
   Node,
   Edge,
   applyNodeChanges,
   NodeChange,
 } from "@xyflow/react";
+import { TFile, Notice } from "obsidian";
 import type { App } from "obsidian";
 import type GraphChatPlugin from "../main";
-import { buildVaultGraph } from "../graph/buildGraph";
+import { buildVaultGraph, VaultNodeKind } from "../graph/buildGraph";
 import { layoutGraph } from "../graph/layout";
+import { parseThread, ChatThread } from "../chat/persistence";
 import { PluginContext } from "./PluginContext";
 import { NoteNode } from "./NoteNode";
 import { TagNode } from "./TagNode";
@@ -46,7 +47,8 @@ export function GraphCanvas({
         label: n.label,
         path: n.id,
         degree: n.degree,
-        onStartChat: (() => {}) as any, // bound below via closure state
+        kind: n.kind,
+        onStartChat: (() => {}) as any, // bound below
       },
     }));
     const edges: Edge[] = graph.edges.map((e) => ({
@@ -66,11 +68,27 @@ export function GraphCanvas({
     setEdges((es) => es.filter((e) => e.source !== nodeId && e.target !== nodeId));
   }, []);
 
-  const startChat = useCallback(
-    (notePath: string, nodeId: string) => {
+  const spawnCard = useCallback(
+    (
+      anchorNodeId: string,
+      sourceNotePath: string,
+      initialThread?: ChatThread
+    ) => {
       setNodes((ns) => {
-        const anchor = ns.find((n) => n.id === nodeId);
+        const anchor = ns.find((n) => n.id === anchorNodeId);
         if (!anchor) return ns;
+
+        // one card per thread/note — don't stack duplicates
+        const dup = ns.find(
+          (n) =>
+            n.type === "chatCard" &&
+            (initialThread?.filePath
+              ? (n.data as any).initialThread?.filePath === initialThread.filePath
+              : (n.data as any).sourceNotePath === sourceNotePath &&
+                !(n.data as any).initialThread)
+        );
+        if (dup) return ns;
+
         const chatId = `chat-${++chatCounter}`;
         const chatNode: Node = {
           id: chatId,
@@ -80,13 +98,13 @@ export function GraphCanvas({
             y: anchor.position.y - 60,
           },
           dragHandle: ".gc-drag-handle",
-          data: { sourceNotePath: notePath, onClose: closeChat },
+          data: { sourceNotePath, initialThread, onClose: closeChat },
         };
         setEdges((es) => [
           ...es,
           {
-            id: `${nodeId}->${chatId}`,
-            source: nodeId,
+            id: `${anchorNodeId}->${chatId}`,
+            source: anchorNodeId,
             target: chatId,
             animated: true,
             className: "gc-edge-chat",
@@ -98,7 +116,27 @@ export function GraphCanvas({
     [closeChat]
   );
 
-  // bind the callback into note node data (stable via useMemo above)
+  const startChat = useCallback(
+    (notePath: string, nodeId: string, kind: VaultNodeKind) => {
+      if (kind === "chat") {
+        // saved chat note → reopen the thread, resume its session
+        const file = app.vault.getAbstractFileByPath(notePath);
+        if (!(file instanceof TFile)) return;
+        void app.vault.cachedRead(file).then((content) => {
+          const thread = parseThread(notePath, content);
+          if (!thread) {
+            new Notice("Could not parse this chat note.");
+            return;
+          }
+          spawnCard(nodeId, thread.sourceNotePath, thread);
+        });
+      } else {
+        spawnCard(nodeId, notePath);
+      }
+    },
+    [app, spawnCard]
+  );
+
   const boundNodes = useMemo(
     () =>
       nodes.map((n) =>
@@ -129,7 +167,6 @@ export function GraphCanvas({
         >
           <Background gap={24} />
           <Controls showInteractive={false} />
-          <MiniMap pannable zoomable className="gc-minimap" />
         </ReactFlow>
       </div>
     </PluginContext.Provider>

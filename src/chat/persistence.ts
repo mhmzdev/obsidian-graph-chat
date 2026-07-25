@@ -74,3 +74,35 @@ export async function saveThread(
   }
   return thread.filePath;
 }
+
+/**
+ * Parse a saved chat note back into a thread so it can be reopened
+ * (and its Claude session resumed via the stored session id).
+ */
+export function parseThread(
+  filePath: string,
+  content: string
+): ChatThread | null {
+  const sourceMatch = content.match(/^Source: \[\[(.+?)\]\]/m);
+  const sessionMatch = content.match(/^Session: (\S+)/m);
+
+  const messages: ChatMessage[] = [];
+  const parts = content.split(/^## (Me|Claude)\s*$/m);
+  for (let i = 1; i + 1 < parts.length + 1; i += 2) {
+    const body = parts[i + 1];
+    if (body === undefined) break;
+    messages.push({
+      role: parts[i] === "Me" ? "user" : "assistant",
+      text: body.trim(),
+    });
+  }
+
+  if (!sourceMatch && messages.length === 0) return null;
+  const sessionId = sessionMatch?.[1];
+  return {
+    sourceNotePath: (sourceMatch?.[1] ?? "unknown") + ".md",
+    sessionId: sessionId && sessionId !== "pending" ? sessionId : "",
+    messages,
+    filePath,
+  };
+}

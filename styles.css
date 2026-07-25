@@ -667,27 +667,10 @@ svg.react-flow__connectionline {
   line-height: 1.2;
 }
 
-.gc-note-actions {
-  position: absolute;
-  top: -14px;
-  right: -14px;
-  opacity: 0;
-  transition: opacity 0.15s ease;
-}
-
-.gc-note-node:hover .gc-note-actions {
-  opacity: 1;
-}
-
-.gc-chat-btn {
-  border: none;
+/* saved chat notes get an accent tint in the graph */
+.gc-note-circle.gc-kind-chat {
   background: var(--interactive-accent);
-  border-radius: 50%;
-  width: 26px;
-  height: 26px;
-  font-size: 13px;
-  cursor: pointer;
-  box-shadow: var(--shadow-s);
+  opacity: 0.65;
 }
 
 /* --- tag hub nodes (ToC, not chattable) --- */
@@ -817,6 +800,16 @@ svg.react-flow__connectionline {
 .gc-send-btn:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+.gc-saved-path {
+  padding: 3px 10px;
+  font-size: 10px;
+  color: var(--text-faint);
+  border-top: 1px solid var(--background-modifier-border);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* --- edges & misc --- */

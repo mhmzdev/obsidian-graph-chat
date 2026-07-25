@@ -7,6 +7,8 @@ import { saveThread, ChatThread, ChatMessage } from "../chat/persistence";
 
 export interface ChatCardData {
   sourceNotePath: string;
+  /** present when reopening a saved chat note — resumes its session */
+  initialThread?: ChatThread;
   onClose: (nodeId: string) => void;
   [key: string]: unknown;
 }
@@ -14,26 +16,47 @@ export interface ChatCardData {
 export function ChatCardNode({ id, data }: NodeProps) {
   const d = data as ChatCardData;
   const { app, plugin } = usePluginCtx();
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const threadRef = useRef<ChatThread>(
+    d.initialThread ?? {
+      sourceNotePath: d.sourceNotePath,
+      sessionId: "",
+      messages: [],
+    }
+  );
+  const [messages, setMessages] = useState<ChatMessage[]>(
+    threadRef.current.messages
+  );
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const threadRef = useRef<ChatThread>({
-    sourceNotePath: d.sourceNotePath,
-    sessionId: "",
-    messages: [],
-  });
+  const [savedPath, setSavedPath] = useState<string | null>(
+    threadRef.current.filePath ?? null
+  );
   const cancelRef = useRef<(() => void) | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const sourceName =
-    d.sourceNotePath.replace(/\.md$/, "").split("/").pop() ?? "note";
+    threadRef.current.sourceNotePath.replace(/\.md$/, "").split("/").pop() ??
+    "note";
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [messages]);
 
   useEffect(() => () => cancelRef.current?.(), []);
+
+  const persist = async () => {
+    try {
+      const path = await saveThread(
+        app,
+        plugin.settings.chatsFolder,
+        threadRef.current
+      );
+      setSavedPath(path);
+    } catch (e: any) {
+      setError("Saving chat failed: " + e.message);
+    }
+  };
 
   const send = () => {
     const text = input.trim();
@@ -46,10 +69,11 @@ export function ChatCardNode({ id, data }: NodeProps) {
     const isFirst = thread.messages.length === 0;
     thread.messages.push({ role: "user", text });
     setMessages([...thread.messages]);
+    void persist(); // save immediately — the thread exists in Chats/ from message one
 
     // First turn: point Claude at the source note. After that --resume keeps context.
     const prompt = isFirst
-      ? `You are chatting inside an Obsidian vault. This conversation is anchored to the note "${d.sourceNotePath}". Read that note first, follow its wikilinks if helpful, then answer concisely.\n\nQuestion: ${text}`
+      ? `You are chatting inside an Obsidian vault. This conversation is anchored to the note "${thread.sourceNotePath}". Read that note first, follow its wikilinks if helpful, then answer concisely.\n\nQuestion: ${text}`
       : text;
 
     const adapter = app.vault.adapter;
@@ -75,15 +99,12 @@ export function ChatCardNode({ id, data }: NodeProps) {
         thread.sessionId = sessionId;
         setMessages([...thread.messages]);
         setBusy(false);
-        try {
-          await saveThread(app, plugin.settings.chatsFolder, thread);
-        } catch (e: any) {
-          setError("Saved chat failed: " + e.message);
-        }
+        await persist();
       },
       onError: (err) => {
         setError(err);
         setBusy(false);
+        void persist();
       },
     });
   };
@@ -101,7 +122,8 @@ export function ChatCardNode({ id, data }: NodeProps) {
         {messages.length === 0 && (
           <div className="gc-chat-empty">
             Ask anything about <b>{sourceName}</b> — Claude reads your vault
-            (read-only).
+            (read-only). The thread saves automatically to{" "}
+            <b>{plugin.settings.chatsFolder}/</b>.
           </div>
         )}
         {messages.map((m, i) => (
@@ -129,6 +151,7 @@ export function ChatCardNode({ id, data }: NodeProps) {
           ➤
         </button>
       </div>
+      {savedPath && <div className="gc-saved-path">saved · {savedPath}</div>}
     </div>
   );
 }
