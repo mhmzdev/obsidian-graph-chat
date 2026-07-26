@@ -47,7 +47,9 @@ export async function saveThread(
   const firstUser = thread.messages.find((m) => m.role === "user")?.text ?? "chat";
 
   if (!thread.filePath) {
-    const base = `chat - ${slug(sourceBase)} - ${slug(firstUser) || "thread"}`;
+    const base = sourceBase
+      ? `chat - ${slug(sourceBase)} - ${slug(firstUser) || "thread"}`
+      : `chat - ${slug(firstUser) || "thread"}`;
     let candidate = normalizePath(`${chatsFolder}/${base}.md`);
     for (let i = 2; app.vault.getAbstractFileByPath(candidate); i++) {
       candidate = normalizePath(`${chatsFolder}/${base} ${i}.md`);
@@ -59,12 +61,14 @@ export async function saveThread(
   if (thread.tags && thread.tags.length > 0) {
     lines.push(`Tags: ${thread.tags.map((t) => `[[${t}]]`).join(" ")}`);
   }
+  if (sourceBase) {
+    lines.push(`Source: [[${sourceBase}]]`);
+  }
   lines.push(
-    `Source: [[${sourceBase}]]`,
     `Session: ${thread.sessionId || "pending"}`,
     `Updated: ${today()}`,
     "",
-    `# ${thread.title ?? `Chat — ${sourceBase}`}`,
+    `# ${thread.title ?? (sourceBase ? `Chat — ${sourceBase}` : "Chat")}`,
     ""
   );
   for (const m of thread.messages) {
@@ -144,7 +148,7 @@ export function parseThread(
     (m) => m[1]
   );
   return {
-    sourceNotePath: (sourceMatch?.[1] ?? "unknown") + ".md",
+    sourceNotePath: sourceMatch ? sourceMatch[1] + ".md" : "",
     sessionId: sessionId && sessionId !== "pending" ? sessionId : "",
     messages,
     filePath,

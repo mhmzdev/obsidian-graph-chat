@@ -38,6 +38,8 @@ export interface ChatCardData {
   currentSessionId?: string;
   /** kept fresh by the card once the thread is saved to disk */
   filePath?: string;
+  /** set by the canvas when the Source link edge is deleted */
+  sourceDetached?: boolean;
   onClose: (nodeId: string) => void;
   onFork: (nodeId: string, side: BranchSide, snapshot: ForkSnapshot) => void;
   onSessionUpdate: (nodeId: string, sessionId: string) => void;
@@ -125,6 +127,8 @@ export function ChatCardNode({ id, data }: NodeProps) {
   );
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
+  const [, setSourceGone] = useState(false); // re-render after detach
+  const modelWrapRef = useRef<HTMLDivElement>(null);
   const cancelRef = useRef<(() => void) | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -152,6 +156,17 @@ export function ChatCardNode({ id, data }: NodeProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Source edge deleted on the canvas → the chat stands alone from now on.
+  useEffect(() => {
+    if (!d.sourceDetached || !threadRef.current.sourceNotePath) return;
+    threadRef.current.sourceNotePath = "";
+    setSourceGone(true);
+    if (threadRef.current.filePath || threadRef.current.messages.length > 0) {
+      void persist();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [d.sourceDetached]);
+
   // linkedTags on node data is the source of truth (canvas adds/removes on
   // link drag / edge delete) — mirror it into the thread and persist.
   useEffect(() => {
@@ -169,10 +184,20 @@ export function ChatCardNode({ id, data }: NodeProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [linkedTags?.join("|")]);
 
-  const sourceName =
-    threadRef.current.sourceNotePath.replace(/\.md$/, "").split("/").pop() ??
-    "note";
+  const sourceName = threadRef.current.sourceNotePath
+    ? threadRef.current.sourceNotePath.replace(/\.md$/, "").split("/").pop()!
+    : "standalone chat";
   const displayTitle = title ?? sourceName;
+
+  // model menu closes on outside click — hover must not dismiss it
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDown = (e: PointerEvent) => {
+      if (!modelWrapRef.current?.contains(e.target as Node)) setMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", onDown, true);
+    return () => document.removeEventListener("pointerdown", onDown, true);
+  }, [menuOpen]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
@@ -242,7 +267,9 @@ export function ChatCardNode({ id, data }: NodeProps) {
 
     let prefix = "";
     if (isFirstEver && !thread.forkFromSessionId) {
-      prefix += `You are chatting inside an Obsidian vault. This conversation is anchored to the note "${thread.sourceNotePath}". Read that note first, follow its wikilinks if helpful, then answer concisely.\n\n`;
+      prefix += thread.sourceNotePath
+        ? `You are chatting inside an Obsidian vault. This conversation is anchored to the note "${thread.sourceNotePath}". Read that note first, follow its wikilinks if helpful, then answer concisely.\n\n`
+        : `You are chatting inside an Obsidian vault. Answer concisely; read vault notes when the question calls for it.\n\n`;
     }
     const freshLinks = linkedNotes.filter(
       (p) => !consumedLinksRef.current.has(p)
@@ -472,7 +499,7 @@ export function ChatCardNode({ id, data }: NodeProps) {
         </button>
       </div>
       <div className="gc-chat-footer">
-        <div className="gc-model-wrap" onMouseLeave={() => setMenuOpen(false)}>
+        <div className="gc-model-wrap" ref={modelWrapRef}>
           {menuOpen && (
             <div className="gc-model-menu">
               {MODELS.map((m) => (

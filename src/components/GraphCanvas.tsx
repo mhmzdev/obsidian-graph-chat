@@ -19,7 +19,6 @@ import type GraphChatPlugin from "../main";
 import { buildVaultGraph, VaultNodeKind, VaultNode } from "../graph/buildGraph";
 import { layoutGraph } from "../graph/layout";
 import { ChatThread } from "../chat/persistence";
-import { confirmDialog } from "../ui/confirm";
 import { PluginContext } from "./PluginContext";
 import { NoteNode, BranchSide } from "./NoteNode";
 import { TagNode } from "./TagNode";
@@ -461,9 +460,8 @@ function CanvasInner({
             ...openCards.map((n) => `${nodeId}->${n.id}`),
           ]);
           setHighlight({ nodes: hNodes, edges: hEdges });
-          return;
         }
-        spawnCard(nodeId, notePath, false, side);
+        // no chats → a plain click does nothing; chats start from “+” only
         return;
       }
       spawnCard(nodeId, notePath, true, side);
@@ -725,33 +723,19 @@ function CanvasInner({
         }
 
         if (chatNode) {
-          void (async () => {
-            const ok = await confirmDialog(
-              app,
-              "Delete this chat?",
-              "A chat can't stand alone — it branches from this link. Deleting the link deletes the chat and its history (the note in Chats/ goes to trash).",
-              "Delete chat"
-            );
-            if (!ok) {
-              setEdges((es) => [...es, e]); // restore the link
-              return;
-            }
-            const path =
-              ((chatNode.data as any).filePath as string) ??
-              (chatNode.id.includes("/") ? chatNode.id : undefined);
-            if (path) {
-              const f = app.vault.getAbstractFileByPath(path);
-              if (f) await app.fileManager.trashFile(f);
-              closedChatsRef.current.add(path);
-            }
-            setNodes((all) => all.filter((n) => n.id !== chatNode.id));
-            setEdges((es) =>
-              es.filter(
-                (x) => x.source !== chatNode.id && x.target !== chatNode.id
+          // chats are real notes — detaching just removes the link, the chat
+          // lives on standalone with whatever context it already holds
+          const other = chatNode.id === e.source ? tgt : src;
+          if (e.className === "gc-edge" && other?.type === "note") {
+            setNodes((all) =>
+              all.map((n) =>
+                n.id === chatNode.id
+                  ? { ...n, data: { ...n.data, sourceDetached: true } }
+                  : n
               )
             );
-            new Notice("Chat deleted.");
-          })();
+            new Notice("Chat detached — it now stands alone.");
+          }
           continue;
         }
 
