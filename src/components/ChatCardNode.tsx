@@ -141,6 +141,8 @@ export function ChatCardNode({ id, data }: NodeProps) {
       setMessages(t.messages);
       setSavedPath(t.filePath ?? d.loadPath!);
       setTitle(t.title ?? null);
+      // drag-branches read the session from node data — keep it fresh
+      if (t.sessionId) d.onSessionUpdate(id, t.sessionId);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -348,7 +350,9 @@ export function ChatCardNode({ id, data }: NodeProps) {
               {displayTitle}
             </span>
           )}
-          {isBranchRef.current && <span className="gc-fork-badge">branch</span>}
+          <span className="gc-fork-badge">
+            {isBranchRef.current ? "branch" : "chat"}
+          </span>
         </span>
         <span className="gc-header-btns">
           <button

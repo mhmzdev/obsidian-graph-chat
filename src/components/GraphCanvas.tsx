@@ -331,7 +331,6 @@ function CanvasInner({
             sourceHandle,
             target: chatId,
             targetHandle: side === "left" ? "from-right" : undefined,
-            animated: true,
             className: "gc-edge-chat",
           },
         ]);
@@ -399,7 +398,6 @@ function CanvasInner({
             sourceHandle: side === "left" ? "plus-left" : "plus-right",
             target: chatId,
             targetHandle: side === "left" ? "from-right" : undefined,
-            animated: true,
             className: "gc-edge-chat",
           },
         ]);
@@ -474,8 +472,22 @@ function CanvasInner({
       const card = tgt.type === "chatCard" ? tgt : src.type === "chatCard" ? src : null;
       const other = card === tgt ? src : tgt;
       if (card) {
-        if (other.type === "chatCard") return;
-        const notePath = (other.data as any).path as string;
+        // chat→chat: the target chat gains the other chat's transcript as context
+        let notePath: string;
+        if (other.type === "chatCard") {
+          const p =
+            ((other.data as any).filePath as string | undefined) ??
+            (other.id.includes("/") ? other.id : undefined);
+          if (!p) {
+            new Notice("That chat has no saved note yet — send a message first.");
+            return;
+          }
+          notePath = p;
+        } else {
+          notePath = (other.data as any).path as string;
+        }
+        const already = ((card.data as any).linkedNotes as string[]) ?? [];
+        if (already.includes(notePath)) return;
         setNodes((all) =>
           all.map((n) =>
             n.id === card.id
@@ -703,20 +715,27 @@ function CanvasInner({
     ]
   );
 
+  // edges touching a selected node flow (dashed + animated) toward its children
+  const selectedIds = useMemo(
+    () => new Set(nodes.filter((n) => n.selected).map((n) => n.id)),
+    [nodes]
+  );
+
   const displayEdges = useMemo(
     () =>
-      highlight
-        ? edges.map((e) =>
-            highlight.edges.has(e.id)
-              ? {
-                  ...e,
-                  className: (e.className ?? "") + " gc-edge-glow",
-                  animated: true,
-                }
-              : e
-          )
-        : edges,
-    [edges, highlight]
+      edges.map((e) => {
+        const glow = highlight?.edges.has(e.id) ?? false;
+        const flow = selectedIds.has(e.source) || selectedIds.has(e.target);
+        if (!glow && !flow) return e;
+        return {
+          ...e,
+          animated: true,
+          className: [e.className, glow && "gc-edge-glow", flow && "gc-edge-flow"]
+            .filter(Boolean)
+            .join(" "),
+        };
+      }),
+    [edges, highlight, selectedIds]
   );
 
   const onNodesChange = useCallback(
