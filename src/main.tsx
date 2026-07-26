@@ -18,6 +18,8 @@ const DEFAULT_SETTINGS: GraphChatSettings = {
 
 export default class GraphChatPlugin extends Plugin {
   settings: GraphChatSettings = DEFAULT_SETTINGS;
+  /** persisted canvas positions, keyed by node id (vault path) */
+  positions: Record<string, { x: number; y: number }> = {};
 
   async onload() {
     await this.loadSettings();
@@ -51,10 +53,18 @@ export default class GraphChatPlugin extends Plugin {
   }
 
   async loadSettings() {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    const data = ((await this.loadData()) ?? {}) as Record<string, unknown>;
+    this.positions =
+      (data.positions as Record<string, { x: number; y: number }>) ?? {};
+    delete data.positions;
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, data);
   }
 
   async saveSettings() {
-    await this.saveData(this.settings);
+    await this.saveData({ ...this.settings, positions: this.positions });
+  }
+
+  async savePositions() {
+    await this.saveSettings();
   }
 }

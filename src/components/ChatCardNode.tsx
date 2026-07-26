@@ -5,10 +5,16 @@ import {
   MarkdownRenderer,
   Component,
   setIcon,
+  TFile,
 } from "obsidian";
 import { usePluginCtx } from "./PluginContext";
 import { runPrompt } from "../chat/claudeSession";
-import { saveThread, ChatThread, ChatMessage } from "../chat/persistence";
+import {
+  saveThread,
+  parseThread,
+  ChatThread,
+  ChatMessage,
+} from "../chat/persistence";
 import type { BranchSide } from "./NoteNode";
 
 export interface ForkSnapshot {
@@ -18,16 +24,21 @@ export interface ForkSnapshot {
 
 export interface ChatCardData {
   sourceNotePath: string;
-  /** present when reopening a saved chat note — resumes its session */
+  /** present when spawning with a known thread (branch, ephemeral) */
   initialThread?: ChatThread;
+  /** saved chat note path — the card loads its thread from this file */
+  loadPath?: string;
   anchorNodeId?: string;
   /** vault paths dropped onto this card as extra context */
   linkedNotes?: string[];
-  /** kept fresh by the card so drag-forks know the live session */
+  /** kept fresh by the card so drag-branches know the live session */
   currentSessionId?: string;
+  /** kept fresh by the card once the thread is saved to disk */
+  filePath?: string;
   onClose: (nodeId: string) => void;
   onFork: (nodeId: string, side: BranchSide, snapshot: ForkSnapshot) => void;
   onSessionUpdate: (nodeId: string, sessionId: string) => void;
+  onSaved: (nodeId: string, filePath: string) => void;
   [key: string]: unknown;
 }
 
@@ -93,7 +104,7 @@ export function ChatCardNode({ id, data }: NodeProps) {
       messages: [],
     }
   );
-  const isForkRef = useRef(!!threadRef.current.forkFromSessionId);
+  const isBranchRef = useRef(!!threadRef.current.forkFromSessionId);
   const [messages, setMessages] = useState<ChatMessage[]>(
     threadRef.current.messages
   );
@@ -103,8 +114,13 @@ export function ChatCardNode({ id, data }: NodeProps) {
   const [model, setModel] = useState("sonnet");
   const [menuOpen, setMenuOpen] = useState(false);
   const [savedPath, setSavedPath] = useState<string | null>(
-    threadRef.current.filePath ?? null
+    threadRef.current.filePath ?? d.loadPath ?? null
   );
+  const [title, setTitle] = useState<string | null>(
+    threadRef.current.title ?? null
+  );
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState("");
   const cancelRef = useRef<(() => void) | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -112,9 +128,26 @@ export function ChatCardNode({ id, data }: NodeProps) {
 
   const linkedNotes = (d.linkedNotes ?? []) as string[];
 
+  // Saved chat notes render directly as chat boxes: load thread from disk.
+  useEffect(() => {
+    if (!d.loadPath || threadRef.current.messages.length > 0) return;
+    const f = app.vault.getAbstractFileByPath(d.loadPath);
+    if (!(f instanceof TFile)) return;
+    void app.vault.cachedRead(f).then((content) => {
+      const t = parseThread(d.loadPath!, content);
+      if (!t) return;
+      threadRef.current = t;
+      setMessages(t.messages);
+      setSavedPath(t.filePath ?? d.loadPath!);
+      setTitle(t.title ?? null);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const sourceName =
     threadRef.current.sourceNotePath.replace(/\.md$/, "").split("/").pop() ??
     "note";
+  const displayTitle = title ?? sourceName;
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
@@ -137,8 +170,20 @@ export function ChatCardNode({ id, data }: NodeProps) {
         threadRef.current
       );
       setSavedPath(path);
+      d.onSaved(id, path);
     } catch (e: any) {
       setError("Saving chat failed: " + e.message);
+    }
+  };
+
+  const commitTitle = () => {
+    setEditingTitle(false);
+    const t = titleDraft.trim();
+    if (!t || t === displayTitle) return;
+    setTitle(t);
+    threadRef.current.title = t;
+    if (threadRef.current.messages.length > 0 || threadRef.current.filePath) {
+      void persist();
     }
   };
 
@@ -190,7 +235,7 @@ export function ChatCardNode({ id, data }: NodeProps) {
       },
       onDone: async (sessionId, fullText) => {
         assistantMsg.text = fullText || assistantMsg.text;
-        thread.sessionId = sessionId; // fork gets its own id here
+        thread.sessionId = sessionId; // a branch gets its own id here
         d.onSessionUpdate(id, sessionId);
         setMessages([...thread.messages]);
         setBusy(false);
@@ -216,7 +261,7 @@ export function ChatCardNode({ id, data }: NodeProps) {
       id={`fork-${side}`}
       position={side === "left" ? Position.Left : Position.Right}
       className={`gc-plus-handle gc-plus-${side} gc-fork-handle`}
-      title="Click: fork this conversation · Drag: link a note in, or drop on empty space to fork there"
+      title="Click: branch from here · Drag: link a note in, or drop on empty space to branch there"
       onClick={(e) => {
         e.stopPropagation();
         d.onFork(id, side, {
@@ -252,8 +297,31 @@ export function ChatCardNode({ id, data }: NodeProps) {
       <div className="gc-chat-header gc-drag-handle">
         <span className="gc-chat-title">
           <Icon name="message-circle" size={14} />
-          <span className="gc-chat-title-text">{sourceName}</span>
-          {isForkRef.current && <span className="gc-fork-badge">fork</span>}
+          {editingTitle ? (
+            <input
+              className="gc-title-input nodrag"
+              value={titleDraft}
+              autoFocus
+              onChange={(e) => setTitleDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") commitTitle();
+                if (e.key === "Escape") setEditingTitle(false);
+              }}
+              onBlur={commitTitle}
+            />
+          ) : (
+            <span
+              className="gc-chat-title-text"
+              title="Click to rename"
+              onClick={() => {
+                setTitleDraft(displayTitle);
+                setEditingTitle(true);
+              }}
+            >
+              {displayTitle}
+            </span>
+          )}
+          {isBranchRef.current && <span className="gc-fork-badge">branch</span>}
         </span>
         <span className="gc-header-btns">
           <button
@@ -266,7 +334,7 @@ export function ChatCardNode({ id, data }: NodeProps) {
           </button>
           <button
             className="gc-header-btn"
-            title="Close card (chat stays saved)"
+            title="Hide card (chat stays saved)"
             onClick={() => d.onClose(id)}
           >
             <Icon name="x" size={13} />
@@ -275,11 +343,11 @@ export function ChatCardNode({ id, data }: NodeProps) {
       </div>
       <div className="gc-chat-messages" ref={scrollRef}>
         {messages.length === 0 &&
-          (isForkRef.current ? (
+          (isBranchRef.current ? (
             <div className="gc-chat-empty">
-              <b>Forked conversation</b> — Claude remembers everything up to
-              the fork point of <b>{sourceName}</b>. Continue from here, with
-              any model.
+              <b>Branched conversation</b> — Claude remembers everything up to
+              the branch point of <b>{sourceName}</b>. Continue from here,
+              with any model.
             </div>
           ) : (
             <div className="gc-chat-empty">

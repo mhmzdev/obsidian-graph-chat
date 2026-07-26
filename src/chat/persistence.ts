@@ -10,8 +10,10 @@ export interface ChatThread {
   sessionId: string;
   messages: ChatMessage[];
   filePath?: string; // set once persisted
-  /** fork parent — first send resumes this session with --fork-session */
+  /** branch parent — first send resumes this session with --fork-session */
   forkFromSessionId?: string;
+  /** user-set display title (stored as the # heading) */
+  title?: string;
 }
 
 function slug(s: string): string {
@@ -56,7 +58,7 @@ export async function saveThread(
     `Session: ${thread.sessionId || "pending"}`,
     `Updated: ${today()}`,
     "",
-    `# Chat — ${sourceBase}`,
+    `# ${thread.title ?? `Chat — ${sourceBase}`}`,
     "",
   ];
   for (const m of thread.messages) {
@@ -105,10 +107,13 @@ export function parseThread(
 
   if (!sourceMatch && messages.length === 0) return null;
   const sessionId = sessionMatch?.[1];
+  const headingMatch = content.match(/^# (.+)$/m);
+  const heading = headingMatch?.[1]?.trim();
   return {
     sourceNotePath: (sourceMatch?.[1] ?? "unknown") + ".md",
     sessionId: sessionId && sessionId !== "pending" ? sessionId : "",
     messages,
     filePath,
+    title: heading && !heading.startsWith("Chat — ") ? heading : undefined,
   };
 }

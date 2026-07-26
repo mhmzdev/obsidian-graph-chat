@@ -16,9 +16,10 @@ import {
 import { TFile, Notice } from "obsidian";
 import type { App } from "obsidian";
 import type GraphChatPlugin from "../main";
-import { buildVaultGraph, VaultNodeKind } from "../graph/buildGraph";
+import { buildVaultGraph, VaultNodeKind, VaultNode } from "../graph/buildGraph";
 import { layoutGraph } from "../graph/layout";
-import { parseThread, ChatThread } from "../chat/persistence";
+import { ChatThread } from "../chat/persistence";
+import { confirmDialog } from "../ui/confirm";
 import { PluginContext } from "./PluginContext";
 import { NoteNode, BranchSide } from "./NoteNode";
 import { TagNode } from "./TagNode";
@@ -74,30 +75,62 @@ function CanvasInner({
 }) {
   const ctx = useMemo(() => ({ app, plugin }), [app, plugin]);
   const { screenToFlowPosition } = useReactFlow();
+  // saved chats the user hid this session (✕) — live sync won't re-add them
+  const closedChatsRef = useRef<Set<string>>(new Set());
+
+  const makeGraphNode = useCallback(
+    (g: VaultNode, position: { x: number; y: number }): Node => {
+      if (g.kind === "chat") {
+        // saved chats live on the canvas as full chat boxes
+        return {
+          id: g.id,
+          type: "chatCard",
+          position,
+          dragHandle: ".gc-drag-handle",
+          data: {
+            sourceNotePath: g.id, // real source resolves after load
+            loadPath: g.id,
+            filePath: g.id,
+            onClose: (() => {}) as any, // bound later
+            onFork: (() => {}) as any,
+            onSessionUpdate: (() => {}) as any,
+            onSaved: (() => {}) as any,
+          },
+        };
+      }
+      return {
+        id: g.id,
+        type: g.kind === "tag" ? "tag" : "note",
+        position,
+        data: {
+          label: g.label,
+          path: g.id,
+          degree: g.degree,
+          kind: g.kind,
+          onStartChat: (() => {}) as any,
+        },
+      };
+    },
+    []
+  );
 
   const initial = useMemo(() => {
     const graph = buildVaultGraph(app, plugin.settings);
     const pos = layoutGraph(graph);
-    const nodes: Node[] = graph.nodes.map((n) => ({
-      id: n.id,
-      type: n.kind === "tag" ? "tag" : "note",
-      position: pos[n.id],
-      data: {
-        label: n.label,
-        path: n.id,
-        degree: n.degree,
-        kind: n.kind,
-        onStartChat: (() => {}) as any, // bound below
-      },
-    }));
-    const edges: Edge[] = graph.edges.map((e) => ({
-      id: e.id,
-      source: e.source,
-      target: e.target,
-      className: "gc-edge",
-    }));
+    const nodes: Node[] = graph.nodes.map((n) =>
+      makeGraphNode(n, plugin.positions[n.id] ?? pos[n.id])
+    );
+    const ids = new Set(nodes.map((n) => n.id));
+    const edges: Edge[] = graph.edges
+      .filter((e) => ids.has(e.source) && ids.has(e.target))
+      .map((e) => ({
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        className: "gc-edge",
+      }));
     return { nodes, edges };
-  }, [app, plugin]);
+  }, [app, plugin, makeGraphNode]);
 
   const [nodes, setNodes] = useState<Node[]>(initial.nodes);
   const [edges, setEdges] = useState<Edge[]>(initial.edges);
@@ -107,6 +140,21 @@ function CanvasInner({
     nodesRef.current = nodes;
   }, [nodes]);
 
+  // ---- canvas position persistence ----
+  const saveTimerRef = useRef<number | null>(null);
+  const persistPositions = useCallback(() => {
+    if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = window.setTimeout(() => {
+      saveTimerRef.current = null;
+      for (const n of nodesRef.current) {
+        if (n.id.includes("/") || n.id.endsWith(".md")) {
+          plugin.positions[n.id] = { x: n.position.x, y: n.position.y };
+        }
+      }
+      void plugin.savePositions();
+    }, 400);
+  }, [plugin]);
+
   // Live sync with the vault (debounced on Obsidian's link re-index).
   useEffect(() => {
     let timer: number | null = null;
@@ -115,22 +163,46 @@ function CanvasInner({
       timer = window.setTimeout(() => {
         timer = null;
         const graph = buildVaultGraph(app, plugin.settings);
+        const current = nodesRef.current;
+        // chat notes already represented by an ephemeral (chat-N) card
+        const ephemeralPaths = new Set(
+          current
+            .filter((n) => n.type === "chatCard" && !n.id.includes("/"))
+            .map((n) => (n.data as any).filePath as string | undefined)
+            .filter(Boolean)
+        );
+        const skipChat = (id: string) =>
+          ephemeralPaths.has(id) || closedChatsRef.current.has(id);
+        const finalIds = new Set<string>(
+          current
+            .filter((n) => n.type === "chatCard" && !n.id.includes("/"))
+            .map((n) => n.id)
+        );
+        for (const g of graph.nodes) {
+          if (g.kind === "chat" && skipChat(g.id)) continue;
+          finalIds.add(g.id);
+        }
+
         setNodes((ns) => {
           const byId = new Map(ns.map((n) => [n.id, n]));
-          const inGraph = new Set(graph.nodes.map((g) => g.id));
           const result: Node[] = ns
-            .filter((n) => n.type === "chatCard" || inGraph.has(n.id))
+            .filter(
+              (n) =>
+                (n.type === "chatCard" && !n.id.includes("/")) ||
+                (finalIds.has(n.id) && graph.nodes.some((g) => g.id === n.id))
+            )
             .map((n) => {
               if (n.type === "chatCard") return n;
               const g = graph.nodes.find((g) => g.id === n.id)!;
               return {
                 ...n,
-                type: g.kind === "tag" ? "tag" : "note",
                 data: { ...n.data, degree: g.degree, kind: g.kind, label: g.label },
               };
             });
           for (const g of graph.nodes) {
             if (byId.has(g.id)) continue;
+            if (g.kind === "chat" && skipChat(g.id)) continue;
+            const stored = plugin.positions[g.id];
             const link = graph.edges.find(
               (e) =>
                 (e.source === g.id && byId.has(e.target)) ||
@@ -140,21 +212,15 @@ function CanvasInner({
               ? byId.get(link.source === g.id ? link.target : link.source)
               : undefined;
             const base = anchor?.position ?? { x: 0, y: 0 };
-            result.push({
-              id: g.id,
-              type: g.kind === "tag" ? "tag" : "note",
-              position: {
-                x: base.x + 30 + (result.length % 4) * 40,
-                y: base.y + 150,
-              },
-              data: {
-                label: g.label,
-                path: g.id,
-                degree: g.degree,
-                kind: g.kind,
-                onStartChat: (() => {}) as any,
-              },
-            });
+            result.push(
+              makeGraphNode(
+                g,
+                stored ?? {
+                  x: base.x + 30 + (result.length % 4) * 40,
+                  y: base.y + 150,
+                }
+              )
+            );
           }
           return result;
         });
@@ -162,12 +228,14 @@ function CanvasInner({
           const extraEdges = es.filter(
             (e) => e.className === "gc-edge-chat" || e.className === "gc-edge-link"
           );
-          const graphEdges: Edge[] = graph.edges.map((e) => ({
-            id: e.id,
-            source: e.source,
-            target: e.target,
-            className: "gc-edge",
-          }));
+          const graphEdges: Edge[] = graph.edges
+            .filter((e) => finalIds.has(e.source) && finalIds.has(e.target))
+            .map((e) => ({
+              id: e.id,
+              source: e.source,
+              target: e.target,
+              className: "gc-edge",
+            }));
           return [...graphEdges, ...extraEdges];
         });
       }, 600);
@@ -177,10 +245,16 @@ function CanvasInner({
       app.metadataCache.offref(ref);
       if (timer !== null) window.clearTimeout(timer);
     };
-  }, [app, plugin]);
+  }, [app, plugin, makeGraphNode]);
 
   const closeChat = useCallback((nodeId: string) => {
-    setNodes((ns) => ns.filter((n) => n.id !== nodeId));
+    if (nodeId.includes("/")) closedChatsRef.current.add(nodeId);
+    setNodes((ns) => {
+      const node = ns.find((n) => n.id === nodeId);
+      const savedAs = (node?.data as any)?.filePath as string | undefined;
+      if (savedAs) closedChatsRef.current.add(savedAs);
+      return ns.filter((n) => n.id !== nodeId);
+    });
     setEdges((es) => es.filter((e) => e.source !== nodeId && e.target !== nodeId));
   }, []);
 
@@ -192,20 +266,28 @@ function CanvasInner({
     );
   }, []);
 
-  /** Fork: FRESH chat window whose session continues from the fork point. */
+  const cardSaved = useCallback((nodeId: string, filePath: string) => {
+    setNodes((ns) =>
+      ns.map((n) =>
+        n.id === nodeId ? { ...n, data: { ...n.data, filePath } } : n
+      )
+    );
+  }, []);
+
+  /** Branch: FRESH chat window whose session continues from the branch point. */
   const forkChat = useCallback(
     (
-      cardNodeId: string,
+      anchorNodeId: string,
       side: BranchSide,
       snapshot: ForkSnapshot,
       posOverride?: { x: number; y: number }
     ) => {
       if (!snapshot.sessionId) {
-        new Notice("Nothing to fork yet — send a message first.");
+        new Notice("Nothing to branch from yet — send a message first.");
         return;
       }
       setNodes((ns) => {
-        const anchor = ns.find((n) => n.id === cardNodeId);
+        const anchor = ns.find((n) => n.id === anchorNodeId);
         if (!anchor) return ns;
         const chatId = `chat-${++chatCounter}`;
         const position =
@@ -231,18 +313,22 @@ function CanvasInner({
           data: {
             sourceNotePath: snapshot.sourceNotePath,
             initialThread: forkThread,
-            anchorNodeId: cardNodeId,
+            anchorNodeId,
             onClose: closeChat,
             onFork: (() => {}) as any, // bound below
             onSessionUpdate: (() => {}) as any,
+            onSaved: (() => {}) as any,
           },
         };
+        // note nodes expose plus-* handles, chat cards expose fork-*
+        const sourceHandle =
+          anchor.type === "chatCard" ? `fork-${side}` : `plus-${side}`;
         setEdges((es) => [
           ...es,
           {
-            id: `${cardNodeId}->${chatId}`,
-            source: cardNodeId,
-            sourceHandle: `fork-${side}`,
+            id: `${anchorNodeId}->${chatId}`,
+            source: anchorNodeId,
+            sourceHandle,
             target: chatId,
             targetHandle: side === "left" ? "from-right" : undefined,
             animated: true,
@@ -259,7 +345,6 @@ function CanvasInner({
     (
       anchorNodeId: string,
       sourceNotePath: string,
-      initialThread?: ChatThread,
       forceNew = false,
       side: BranchSide = "right",
       posOverride?: { x: number; y: number }
@@ -275,11 +360,10 @@ function CanvasInner({
         const dup = ns.find(
           (n) =>
             n.type === "chatCard" &&
-            (initialThread?.filePath
-              ? (n.data as any).initialThread?.filePath === initialThread.filePath
-              : !forceNew &&
-                (n.data as any).sourceNotePath === sourceNotePath &&
-                !(n.data as any).initialThread)
+            !forceNew &&
+            (n.data as any).sourceNotePath === sourceNotePath &&
+            (n.data as any).initialThread === undefined &&
+            !(n.data as any).loadPath
         );
         if (dup) return ns;
 
@@ -300,11 +384,11 @@ function CanvasInner({
           dragHandle: ".gc-drag-handle",
           data: {
             sourceNotePath,
-            initialThread,
             anchorNodeId,
             onClose: closeChat,
             onFork: (() => {}) as any, // bound below
             onSessionUpdate: (() => {}) as any,
+            onSaved: (() => {}) as any,
           },
         };
         setEdges((es) => [
@@ -348,39 +432,19 @@ function CanvasInner({
       forceNew = false,
       side: BranchSide = "right"
     ) => {
-      if (kind === "chat") {
-        // saved chat note: click → reopen thread; “+” → fork it
-        const file = app.vault.getAbstractFileByPath(notePath);
-        if (!(file instanceof TFile)) return;
-        void app.vault.cachedRead(file).then((content) => {
-          const thread = parseThread(notePath, content);
-          if (!thread) {
-            new Notice("Could not parse this chat note.");
-            return;
-          }
-          if (forceNew) {
-            forkChat(nodeId, side, {
-              sourceNotePath: thread.sourceNotePath,
-              sessionId: thread.sessionId,
-            });
-          } else {
-            spawnCard(nodeId, thread.sourceNotePath, thread, false, side);
-          }
-        });
-        return;
-      }
-
       if (!forceNew) {
         // plain click: if the note has chats, LIGHT THEM UP instead of opening
         const chatNotes = chatNotesLinkedTo(notePath);
         const openCards = nodesRef.current.filter(
           (n) =>
-            n.type === "chatCard" && (n.data as any).anchorNodeId === nodeId
+            n.type === "chatCard" &&
+            ((n.data as any).anchorNodeId === nodeId ||
+              chatNotes.includes(n.id) ||
+              chatNotes.includes((n.data as any).filePath))
         );
         if (chatNotes.length > 0 || openCards.length > 0) {
           const hNodes = new Set<string>([
             nodeId,
-            ...chatNotes,
             ...openCards.map((n) => n.id),
           ]);
           const hEdges = new Set<string>([
@@ -390,13 +454,12 @@ function CanvasInner({
           setHighlight({ nodes: hNodes, edges: hEdges });
           return;
         }
-        spawnCard(nodeId, notePath, undefined, false, side);
+        spawnCard(nodeId, notePath, false, side);
         return;
       }
-
-      spawnCard(nodeId, notePath, undefined, true, side);
+      spawnCard(nodeId, notePath, true, side);
     },
-    [app, spawnCard, forkChat, chatNotesLinkedTo]
+    [spawnCard, chatNotesLinkedTo]
   );
 
   // Drag a “+” onto another node → wikilink (Tags: line) or chat context.
@@ -470,10 +533,10 @@ function CanvasInner({
     [app]
   );
 
-  // Drop a “+” drag on EMPTY canvas → open a chat/fork card right there.
+  // Drop a “+” drag on EMPTY canvas → open a chat/branch card right there.
   const onConnectEnd = useCallback(
     (event: MouseEvent | TouchEvent, state: FinalConnectionState) => {
-      if (state.isValid) return; // landed on a node — onConnect handled it
+      if (state.isValid) return;
       const fromNode = state.fromNode;
       const handleId = state.fromHandle?.id ?? "";
       if (!fromNode || !/^(plus|fork)-/.test(handleId)) return;
@@ -486,7 +549,6 @@ function CanvasInner({
 
       const pos = screenToFlowPosition({ x: clientX, y: clientY });
       const side: BranchSide = handleId.endsWith("left") ? "left" : "right";
-      // place the card so its connecting edge lands near the drop point
       const cardPos = {
         x: side === "left" ? pos.x - CARD_WIDTH + 20 : pos.x - 20,
         y: pos.y - 30,
@@ -501,68 +563,91 @@ function CanvasInner({
         forkChat(
           fromNode.id,
           side,
-          {
-            sourceNotePath: data.sourceNotePath,
-            sessionId,
-          },
+          { sourceNotePath: data.sourceNotePath, sessionId },
           cardPos
         );
         return;
       }
-      const kind = data.kind as VaultNodeKind;
-      if (kind === "tag") return;
-      if (kind === "chat") {
-        const file = app.vault.getAbstractFileByPath(data.path);
-        if (!(file instanceof TFile)) return;
-        void app.vault.cachedRead(file).then((content) => {
-          const thread = parseThread(data.path, content);
-          if (!thread) return;
-          forkChat(
-            fromNode.id,
-            side,
-            {
-              sourceNotePath: thread.sourceNotePath,
-              sessionId: thread.sessionId,
-            },
-            cardPos
-          );
-        });
-        return;
-      }
-      spawnCard(fromNode.id, data.path, undefined, true, side, cardPos);
+      if ((data.kind as VaultNodeKind) === "tag") return;
+      spawnCard(fromNode.id, data.path, true, side, cardPos);
     },
-    [app, spawnCard, forkChat, screenToFlowPosition]
+    [spawnCard, forkChat, screenToFlowPosition]
   );
 
-  // Deleting a selected graph edge removes the [[wikilink]] from the note.
+  // Deleting an edge: chats can never stand alone — cutting a chat's edge
+  // means deleting the chat (with confirmation). Note↔note edges remove the
+  // [[wikilink]] from the note.
   const onEdgesDelete = useCallback(
     (deleted: Edge[]) => {
       for (const e of deleted) {
-        if (e.className !== "gc-edge") continue;
-        const srcFile = app.vault.getAbstractFileByPath(e.source);
-        const tgtFile = app.vault.getAbstractFileByPath(e.target);
-        const srcBase = e.source.replace(/\.md$/, "").split("/").pop()!;
-        const tgtBase = e.target.replace(/\.md$/, "").split("/").pop()!;
-        void (async () => {
-          let removed = false;
-          if (srcFile instanceof TFile) {
-            const c = await app.vault.cachedRead(srcFile);
-            if (removeWikilink(c, tgtBase) !== c) {
-              await app.vault.process(srcFile, (x) => removeWikilink(x, tgtBase));
-              new Notice(`Removed [[${tgtBase}]] from ${srcFile.basename}`);
-              removed = true;
+        const ns = nodesRef.current;
+        const src = ns.find((n) => n.id === e.source);
+        const tgt = ns.find((n) => n.id === e.target);
+
+        const chatNode =
+          tgt?.type === "chatCard"
+            ? tgt
+            : src?.type === "chatCard"
+            ? src
+            : undefined;
+
+        if (chatNode && e.className !== "gc-edge-link") {
+          void (async () => {
+            const ok = await confirmDialog(
+              app,
+              "Delete this chat?",
+              "A chat can't stand alone — it branches from this link. Deleting the link deletes the chat and its history (the note in Chats/ goes to trash).",
+              "Delete chat"
+            );
+            if (!ok) {
+              setEdges((es) => [...es, e]); // restore the link
+              return;
             }
-          }
-          if (!removed && tgtFile instanceof TFile) {
-            const c = await app.vault.cachedRead(tgtFile);
-            if (removeWikilink(c, srcBase) !== c) {
-              await app.vault.process(tgtFile, (x) => removeWikilink(x, srcBase));
-              new Notice(`Removed [[${srcBase}]] from ${tgtFile.basename}`);
-              removed = true;
+            const path =
+              ((chatNode.data as any).filePath as string) ??
+              (chatNode.id.includes("/") ? chatNode.id : undefined);
+            if (path) {
+              const f = app.vault.getAbstractFileByPath(path);
+              if (f) await app.fileManager.trashFile(f);
+              closedChatsRef.current.add(path);
             }
-          }
-          if (!removed) new Notice("Link not found in either note.");
-        })();
+            setNodes((all) => all.filter((n) => n.id !== chatNode.id));
+            setEdges((es) =>
+              es.filter(
+                (x) => x.source !== chatNode.id && x.target !== chatNode.id
+              )
+            );
+            new Notice("Chat deleted.");
+          })();
+          continue;
+        }
+
+        if (e.className === "gc-edge") {
+          const srcFile = app.vault.getAbstractFileByPath(e.source);
+          const tgtFile = app.vault.getAbstractFileByPath(e.target);
+          const srcBase = e.source.replace(/\.md$/, "").split("/").pop()!;
+          const tgtBase = e.target.replace(/\.md$/, "").split("/").pop()!;
+          void (async () => {
+            let removed = false;
+            if (srcFile instanceof TFile) {
+              const c = await app.vault.cachedRead(srcFile);
+              if (removeWikilink(c, tgtBase) !== c) {
+                await app.vault.process(srcFile, (x) => removeWikilink(x, tgtBase));
+                new Notice(`Removed [[${tgtBase}]] from ${srcFile.basename}`);
+                removed = true;
+              }
+            }
+            if (!removed && tgtFile instanceof TFile) {
+              const c = await app.vault.cachedRead(tgtFile);
+              if (removeWikilink(c, srcBase) !== c) {
+                await app.vault.process(tgtFile, (x) => removeWikilink(x, srcBase));
+                new Notice(`Removed [[${srcBase}]] from ${tgtFile.basename}`);
+                removed = true;
+              }
+            }
+            if (!removed) new Notice("Link not found in either note.");
+          })();
+        }
       }
     },
     [app]
@@ -600,12 +685,22 @@ function CanvasInner({
               onClose: closeChat,
               onFork: forkChat,
               onSessionUpdate: sessionUpdate,
+              onSaved: cardSaved,
             },
           };
         }
         return { ...n, className };
       }),
-    [nodes, startChat, closeChat, forkChat, sessionUpdate, highlight, activeAnchors]
+    [
+      nodes,
+      startChat,
+      closeChat,
+      forkChat,
+      sessionUpdate,
+      cardSaved,
+      highlight,
+      activeAnchors,
+    ]
   );
 
   const displayEdges = useMemo(
@@ -646,6 +741,7 @@ function CanvasInner({
           onEdgesDelete={onEdgesDelete}
           onConnect={onConnect}
           onConnectEnd={onConnectEnd}
+          onNodeDragStop={persistPositions}
           onPaneClick={() => setHighlight(null)}
           connectOnClick={false}
           deleteKeyCode={["Backspace", "Delete"]}
