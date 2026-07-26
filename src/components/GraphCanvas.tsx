@@ -95,6 +95,7 @@ function CanvasInner({
             onFork: (() => {}) as any,
             onSessionUpdate: (() => {}) as any,
             onSaved: (() => {}) as any,
+            onTagsLoaded: (() => {}) as any,
           },
         };
       }
@@ -274,6 +275,14 @@ function CanvasInner({
     );
   }, []);
 
+  const tagsLoaded = useCallback((nodeId: string, tags: string[]) => {
+    setNodes((ns) =>
+      ns.map((n) =>
+        n.id === nodeId ? { ...n, data: { ...n.data, linkedTags: tags } } : n
+      )
+    );
+  }, []);
+
   /** Branch: FRESH chat window whose session continues from the branch point. */
   const forkChat = useCallback(
     (
@@ -318,6 +327,7 @@ function CanvasInner({
             onFork: (() => {}) as any, // bound below
             onSessionUpdate: (() => {}) as any,
             onSaved: (() => {}) as any,
+            onTagsLoaded: (() => {}) as any,
           },
         };
         // note nodes expose plus-* handles, chat cards expose fork-*
@@ -388,6 +398,7 @@ function CanvasInner({
             onFork: (() => {}) as any, // bound below
             onSessionUpdate: (() => {}) as any,
             onSaved: (() => {}) as any,
+            onTagsLoaded: (() => {}) as any,
           },
         };
         setEdges((es) => [
@@ -472,9 +483,66 @@ function CanvasInner({
       const card = tgt.type === "chatCard" ? tgt : src.type === "chatCard" ? src : null;
       const other = card === tgt ? src : tgt;
       if (card) {
-        // chat→chat: the target chat gains the other chat's transcript as context
+        // ---- tag dropped on a chat: real tag on the chat note (Tags: line) ----
+        if (other.type === "tag") {
+          const tagBase = ((other.data as any).path as string)
+            .replace(/\.md$/, "")
+            .split("/")
+            .pop()!;
+          const cur = ((card.data as any).linkedTags as string[]) ?? [];
+          if (cur.includes(tagBase)) return;
+          setNodes((all) =>
+            all.map((n) =>
+              n.id === card.id
+                ? { ...n, data: { ...n.data, linkedTags: [...cur, tagBase] } }
+                : n
+            )
+          );
+          // saved (path-id) chats get the real edge from live sync; ephemeral
+          // cards need a visual edge until then
+          if (!card.id.includes("/")) {
+            setEdges((es) => [
+              ...es,
+              {
+                id: `taglink-${tagBase}->${card.id}`,
+                source: other.id,
+                target: card.id,
+                targetHandle: "drop",
+                className: "gc-edge-link",
+                data: { tagBase, cardId: card.id },
+              },
+            ]);
+          }
+          new Notice(`Tagged chat with [[${tagBase}]]`);
+          return;
+        }
+
+        // ---- chat→chat: target gains the other chat's transcript as context ----
         let notePath: string;
         if (other.type === "chatCard") {
+          const levelOf = (node: Node): number => {
+            let lvl = 1;
+            let cur = node;
+            const seen = new Set<string>();
+            while (cur.type === "chatCard") {
+              const anchorId = (cur.data as any).anchorNodeId as
+                | string
+                | undefined;
+              if (!anchorId || seen.has(anchorId)) break;
+              seen.add(anchorId);
+              const anchor = ns.find((n) => n.id === anchorId);
+              if (!anchor || anchor.type !== "chatCard") break;
+              lvl++;
+              cur = anchor;
+            }
+            return lvl;
+          };
+          if (levelOf(src) === levelOf(tgt)) {
+            new Notice(
+              "Same-level chats can't be linked — link across levels instead."
+            );
+            return;
+          }
           const p =
             ((other.data as any).filePath as string | undefined) ??
             (other.id.includes("/") ? other.id : undefined);
@@ -513,6 +581,7 @@ function CanvasInner({
             target: card.id,
             targetHandle: "drop",
             className: "gc-edge-link",
+            data: { notePath, cardId: card.id },
           },
         ]);
         new Notice(`Linked ${notePath.split("/").pop()} into the chat`);
@@ -603,7 +672,59 @@ function CanvasInner({
             ? src
             : undefined;
 
-        if (chatNode && e.className !== "gc-edge-link") {
+        // context/tag link edges: clean the card's data so chips disappear
+        // and the same link can be made again later
+        if (e.className === "gc-edge-link") {
+          const data = (e.data ?? {}) as { notePath?: string; tagBase?: string; cardId?: string };
+          const cardId = data.cardId ?? (chatNode?.id as string | undefined);
+          if (!cardId) continue;
+          setNodes((all) =>
+            all.map((n) => {
+              if (n.id !== cardId) return n;
+              const nd: any = { ...n.data };
+              if (data.notePath) {
+                nd.linkedNotes = ((nd.linkedNotes as string[]) ?? []).filter(
+                  (p) => p !== data.notePath
+                );
+              }
+              if (data.tagBase) {
+                nd.linkedTags = ((nd.linkedTags as string[]) ?? []).filter(
+                  (t) => t !== data.tagBase
+                );
+              }
+              return { ...n, data: nd };
+            })
+          );
+          continue;
+        }
+
+        // real tag↔chat edge: untag the chat note, never delete the chat
+        if (chatNode && (src?.type === "tag" || tgt?.type === "tag")) {
+          const tagNode = src?.type === "tag" ? src : tgt!;
+          const tagBase = ((tagNode.data as any).path as string)
+            .replace(/\.md$/, "")
+            .split("/")
+            .pop()!;
+          setNodes((all) =>
+            all.map((n) =>
+              n.id === chatNode.id
+                ? {
+                    ...n,
+                    data: {
+                      ...n.data,
+                      linkedTags: (
+                        ((n.data as any).linkedTags as string[]) ?? []
+                      ).filter((t) => t !== tagBase),
+                    },
+                  }
+                : n
+            )
+          );
+          new Notice(`Removed [[${tagBase}]] from the chat`);
+          continue;
+        }
+
+        if (chatNode) {
           void (async () => {
             const ok = await confirmDialog(
               app,
@@ -698,6 +819,7 @@ function CanvasInner({
               onFork: forkChat,
               onSessionUpdate: sessionUpdate,
               onSaved: cardSaved,
+              onTagsLoaded: tagsLoaded,
             },
           };
         }
@@ -710,6 +832,7 @@ function CanvasInner({
       forkChat,
       sessionUpdate,
       cardSaved,
+      tagsLoaded,
       highlight,
       activeAnchors,
     ]

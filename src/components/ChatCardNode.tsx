@@ -32,6 +32,8 @@ export interface ChatCardData {
   anchorNodeId?: string;
   /** vault paths dropped onto this card as extra context */
   linkedNotes?: string[];
+  /** tag basenames linked onto this chat — source of truth lives here */
+  linkedTags?: string[];
   /** kept fresh by the card so drag-branches know the live session */
   currentSessionId?: string;
   /** kept fresh by the card once the thread is saved to disk */
@@ -40,6 +42,7 @@ export interface ChatCardData {
   onFork: (nodeId: string, side: BranchSide, snapshot: ForkSnapshot) => void;
   onSessionUpdate: (nodeId: string, sessionId: string) => void;
   onSaved: (nodeId: string, filePath: string) => void;
+  onTagsLoaded: (nodeId: string, tags: string[]) => void;
   [key: string]: unknown;
 }
 
@@ -125,9 +128,10 @@ export function ChatCardNode({ id, data }: NodeProps) {
   const cancelRef = useRef<(() => void) | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const consumedLinksRef = useRef(0);
+  const consumedLinksRef = useRef<Set<string>>(new Set());
 
   const linkedNotes = (d.linkedNotes ?? []) as string[];
+  const linkedTags = d.linkedTags as string[] | undefined;
 
   // Saved chat notes render directly as chat boxes: load thread from disk.
   useEffect(() => {
@@ -143,9 +147,27 @@ export function ChatCardNode({ id, data }: NodeProps) {
       setTitle(t.title ?? null);
       // drag-branches read the session from node data — keep it fresh
       if (t.sessionId) d.onSessionUpdate(id, t.sessionId);
+      d.onTagsLoaded(id, t.tags ?? []);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // linkedTags on node data is the source of truth (canvas adds/removes on
+  // link drag / edge delete) — mirror it into the thread and persist.
+  useEffect(() => {
+    if (!linkedTags) return;
+    const cur = threadRef.current.tags ?? [];
+    if (
+      cur.length === linkedTags.length &&
+      cur.every((t, i) => t === linkedTags[i])
+    )
+      return;
+    threadRef.current.tags = [...linkedTags];
+    if (threadRef.current.filePath || threadRef.current.messages.length > 0) {
+      void persist();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [linkedTags?.join("|")]);
 
   const sourceName =
     threadRef.current.sourceNotePath.replace(/\.md$/, "").split("/").pop() ??
@@ -222,12 +244,14 @@ export function ChatCardNode({ id, data }: NodeProps) {
     if (isFirstEver && !thread.forkFromSessionId) {
       prefix += `You are chatting inside an Obsidian vault. This conversation is anchored to the note "${thread.sourceNotePath}". Read that note first, follow its wikilinks if helpful, then answer concisely.\n\n`;
     }
-    const freshLinks = linkedNotes.slice(consumedLinksRef.current);
+    const freshLinks = linkedNotes.filter(
+      (p) => !consumedLinksRef.current.has(p)
+    );
     if (freshLinks.length > 0) {
       prefix += `Also read these vault notes as additional context before answering: ${freshLinks
         .map((p) => `"${p}"`)
         .join(", ")}.\n\n`;
-      consumedLinksRef.current = linkedNotes.length;
+      freshLinks.forEach((p) => consumedLinksRef.current.add(p));
     }
     const prompt = prefix ? prefix + "Question: " + text : text;
 
@@ -404,8 +428,13 @@ export function ChatCardNode({ id, data }: NodeProps) {
         ))}
         {error && <div className="gc-msg gc-msg-error">{error}</div>}
       </div>
-      {linkedNotes.length > 0 && (
+      {(linkedNotes.length > 0 || (linkedTags?.length ?? 0) > 0) && (
         <div className="gc-chips">
+          {linkedTags?.map((t) => (
+            <span key={"tag-" + t} className="gc-chip gc-chip-tag" title={`Tags/${t}`}>
+              #{t}
+            </span>
+          ))}
           {linkedNotes.map((p) => (
             <span key={p} className="gc-chip" title={p}>
               <Icon name="paperclip" size={9} />

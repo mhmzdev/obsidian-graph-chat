@@ -14,6 +14,8 @@ export interface ChatThread {
   forkFromSessionId?: string;
   /** user-set display title (stored as the # heading) */
   title?: string;
+  /** tag basenames linked onto this chat (stored on the Tags: line) */
+  tags?: string[];
 }
 
 function slug(s: string): string {
@@ -53,14 +55,18 @@ export async function saveThread(
     thread.filePath = candidate;
   }
 
-  const lines: string[] = [
+  const lines: string[] = [];
+  if (thread.tags && thread.tags.length > 0) {
+    lines.push(`Tags: ${thread.tags.map((t) => `[[${t}]]`).join(" ")}`);
+  }
+  lines.push(
     `Source: [[${sourceBase}]]`,
     `Session: ${thread.sessionId || "pending"}`,
     `Updated: ${today()}`,
     "",
     `# ${thread.title ?? `Chat — ${sourceBase}`}`,
-    "",
-  ];
+    ""
+  );
   for (const m of thread.messages) {
     lines.push(m.role === "user" ? "## Me" : "## Claude");
     lines.push("");
@@ -133,11 +139,16 @@ export function parseThread(
   const sessionId = sessionMatch?.[1];
   const headingMatch = content.match(/^# (.+)$/m);
   const heading = headingMatch?.[1]?.trim();
+  const tagsLine = content.match(/^Tags: (.+)$/m)?.[1] ?? "";
+  const tags = [...tagsLine.matchAll(/\[\[([^\]|]+)(\|[^\]]*)?\]\]/g)].map(
+    (m) => m[1]
+  );
   return {
     sourceNotePath: (sourceMatch?.[1] ?? "unknown") + ".md",
     sessionId: sessionId && sessionId !== "pending" ? sessionId : "",
     messages,
     filePath,
     title: heading && !heading.startsWith("Chat — ") ? heading : undefined,
+    tags: tags.length > 0 ? tags : undefined,
   };
 }
