@@ -114,3 +114,48 @@ export function runPrompt(opts: RunPromptOptions): () => void {
 
   return () => child.kill("SIGTERM");
 }
+
+/**
+ * One-shot cheap Haiku call that names a chat from its first exchange.
+ * Resolves null on any failure — callers keep the fallback name.
+ */
+export function generateTitle(
+  claudePath: string,
+  vaultPath: string,
+  question: string,
+  answer: string
+): Promise<string | null> {
+  return new Promise((resolve) => {
+    const prompt = `Generate a short title (3-5 words, max 40 characters) for a conversation that starts with this question: "${question.slice(
+      0,
+      300
+    )}" and this answer: "${answer.slice(
+      0,
+      500
+    )}". Reply with ONLY the title text — no quotes, no trailing punctuation, no explanation.`;
+    const child = spawn(
+      claudePath,
+      ["-p", prompt, "--model", "haiku", "--output-format", "json"],
+      {
+        cwd: vaultPath,
+        env: { ...process.env },
+        stdio: ["ignore", "pipe", "ignore"],
+      }
+    );
+    let out = "";
+    child.stdout.on("data", (c: Buffer) => (out += c.toString("utf8")));
+    child.on("close", () => {
+      try {
+        const j = JSON.parse(out);
+        const t = String(j.result ?? "")
+          .trim()
+          .split("\n")[0]
+          .replace(/^["'#\s]+|["'.\s]+$/g, "");
+        resolve(t && t.length > 0 && t.length <= 60 ? t : null);
+      } catch {
+        resolve(null);
+      }
+    });
+    child.on("error", () => resolve(null));
+  });
+}

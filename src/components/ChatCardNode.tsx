@@ -8,10 +8,11 @@ import {
   TFile,
 } from "obsidian";
 import { usePluginCtx } from "./PluginContext";
-import { runPrompt } from "../chat/claudeSession";
+import { runPrompt, generateTitle } from "../chat/claudeSession";
 import {
   saveThread,
   parseThread,
+  renameThreadFile,
   ChatThread,
   ChatMessage,
 } from "../chat/persistence";
@@ -176,15 +177,29 @@ export function ChatCardNode({ id, data }: NodeProps) {
     }
   };
 
+  const applyTitle = async (t: string) => {
+    setTitle(t);
+    threadRef.current.title = t;
+    if (!threadRef.current.filePath && threadRef.current.messages.length === 0)
+      return;
+    const renamed = await renameThreadFile(
+      app,
+      plugin.settings.chatsFolder,
+      threadRef.current,
+      t
+    );
+    await persist();
+    if (renamed) {
+      setSavedPath(renamed);
+      d.onSaved(id, renamed);
+    }
+  };
+
   const commitTitle = () => {
     setEditingTitle(false);
     const t = titleDraft.trim();
     if (!t || t === displayTitle) return;
-    setTitle(t);
-    threadRef.current.title = t;
-    if (threadRef.current.messages.length > 0 || threadRef.current.filePath) {
-      void persist();
-    }
+    void applyTitle(t);
   };
 
   const send = () => {
@@ -240,6 +255,18 @@ export function ChatCardNode({ id, data }: NodeProps) {
         setMessages([...thread.messages]);
         setBusy(false);
         await persist();
+        // first exchange of an untitled chat → cheap Haiku call names it
+        if (isFirstEver && !thread.title) {
+          void generateTitle(
+            plugin.settings.claudePath,
+            vaultPath,
+            text,
+            assistantMsg.text
+          ).then((t) => {
+            if (!t || threadRef.current.title) return;
+            void applyTitle(t);
+          });
+        }
       },
       onError: (err) => {
         setError(err);

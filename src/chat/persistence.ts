@@ -84,6 +84,30 @@ export async function saveThread(
 }
 
 /**
+ * Rename a saved chat note to match its title: `chat - <title slug>.md`.
+ * Uses fileManager.renameFile so backlinks stay intact. Returns the new path.
+ */
+export async function renameThreadFile(
+  app: App,
+  chatsFolder: string,
+  thread: ChatThread,
+  title: string
+): Promise<string | null> {
+  if (!thread.filePath) return null;
+  const f = app.vault.getAbstractFileByPath(thread.filePath);
+  if (!(f instanceof TFile)) return null;
+  const base = `chat - ${slug(title) || "thread"}`;
+  let candidate = normalizePath(`${chatsFolder}/${base}.md`);
+  if (candidate === thread.filePath) return thread.filePath;
+  for (let i = 2; app.vault.getAbstractFileByPath(candidate); i++) {
+    candidate = normalizePath(`${chatsFolder}/${base} ${i}.md`);
+  }
+  await app.fileManager.renameFile(f, candidate);
+  thread.filePath = candidate;
+  return candidate;
+}
+
+/**
  * Parse a saved chat note back into a thread so it can be reopened
  * (and its Claude session resumed via the stored session id).
  */
