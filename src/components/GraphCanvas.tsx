@@ -17,7 +17,7 @@ import {
 import { TFile, Notice } from "obsidian";
 import type { App } from "obsidian";
 import type GraphChatPlugin from "../main";
-import { allChatFolders } from "../main";
+import { isChatPath } from "../main";
 import { buildVaultGraph, VaultNodeKind, VaultNode } from "../graph/buildGraph";
 import { layoutGraph } from "../graph/layout";
 import { ChatThread, parseThread } from "../chat/persistence";
@@ -442,10 +442,9 @@ function CanvasInner({
   /** Saved chat notes (paths) whose Source links to this note. Synchronous. */
   const chatNotesLinkedTo = useCallback(
     (notePath: string): string[] => {
-      const prefixes = allChatFolders(plugin.settings).map((f) => f + "/");
       return app.vault
         .getMarkdownFiles()
-        .filter((f) => prefixes.some((p) => f.path.startsWith(p)))
+        .filter((f) => isChatPath(plugin.settings, f.path))
         .filter(
           (f) => notePath in (app.metadataCache.resolvedLinks[f.path] ?? {})
         )

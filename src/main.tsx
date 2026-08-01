@@ -31,6 +31,8 @@ export interface GraphChatSettings {
   models: ModelOption[];
   /** per-source-folder chat storage: notes under sourceFolder save chats to chatsFolder */
   chatRoutes: ChatRoute[];
+  /** folders opted OUT of per-folder chats (their chats go to the root default) */
+  perFolderChatsOff: string[];
 }
 
 export const KNOWN_MODELS: ModelOption[] = [
@@ -53,6 +55,7 @@ const DEFAULT_SETTINGS: GraphChatSettings = {
     { label: "Haiku", value: "haiku" },
   ],
   chatRoutes: [],
+  perFolderChatsOff: [],
 };
 
 /** Every folder that stores chat notes (default + routed). */
@@ -60,7 +63,28 @@ export function allChatFolders(s: GraphChatSettings): string[] {
   return [s.chatsFolder, ...s.chatRoutes.map((r) => r.chatsFolder)];
 }
 
-/** Where a chat for this source note should be stored. Longest match wins. */
+/** Basename used for per-folder chat subfolders (default "Chats"). */
+export function chatsSubfolderName(s: GraphChatSettings): string {
+  return s.chatsFolder.split("/").pop() || "Chats";
+}
+
+/** Is this vault path a chat note? Covers the root default folder, routed
+ * folders, and any per-folder `<folder>/Chats/` subfolder. */
+export function isChatPath(s: GraphChatSettings, path: string): boolean {
+  if (path.startsWith(s.chatsFolder + "/")) return true;
+  if (
+    s.chatRoutes.some(
+      (r) => r.chatsFolder && path.startsWith(r.chatsFolder + "/")
+    )
+  )
+    return true;
+  const parts = path.split("/");
+  return parts.length >= 3 && parts.slice(1, -1).includes(chatsSubfolderName(s));
+}
+
+/** Where a chat for this source note should be stored.
+ * Explicit routes win (longest match), then per-folder `<folder>/Chats`
+ * unless that folder is toggled off, then the root default. */
 export function resolveChatsFolder(
   s: GraphChatSettings,
   sourceNotePath: string
@@ -75,7 +99,17 @@ export function resolveChatsFolder(
       best = r;
     }
   }
-  return best?.chatsFolder ?? s.chatsFolder;
+  if (best) return best.chatsFolder;
+  const top = sourceNotePath.includes("/") ? sourceNotePath.split("/")[0] : "";
+  if (
+    top &&
+    top !== s.tagsFolder &&
+    top !== s.chatsFolder.split("/")[0] &&
+    !s.perFolderChatsOff.includes(top)
+  ) {
+    return `${top}/${chatsSubfolderName(s)}`;
+  }
+  return s.chatsFolder;
 }
 
 export default class GraphChatPlugin extends Plugin {
@@ -185,6 +219,37 @@ class GraphChatSettingTab extends PluginSettingTab {
           await save();
         });
       });
+
+    // ---- per-folder chats: on by default, opt out per folder ----
+    new Setting(containerEl)
+      .setName("Per-folder chats")
+      .setDesc(
+        "By default every folder keeps its chats in its own <folder>/" +
+          chatsSubfolderName(S) +
+          " subfolder. Toggle a folder off to store its chats in the default folder instead. Explicit routing rules below override both."
+      )
+      .setHeading();
+
+    for (const f of topLevel) {
+      if (f === S.tagsFolder || f === S.chatsFolder.split("/")[0]) continue;
+      new Setting(containerEl)
+        .setName(f)
+        .setDesc(`${f}/${chatsSubfolderName(S)}`)
+        .addToggle((tg) =>
+          tg
+            .setValue(!S.perFolderChatsOff.includes(f))
+            .onChange(async (on) => {
+              if (on) {
+                S.perFolderChatsOff = S.perFolderChatsOff.filter(
+                  (x) => x !== f
+                );
+              } else if (!S.perFolderChatsOff.includes(f)) {
+                S.perFolderChatsOff.push(f);
+              }
+              await save();
+            })
+        );
+    }
 
     // ---- chat folder routing: table of rules ----
     new Setting(containerEl)

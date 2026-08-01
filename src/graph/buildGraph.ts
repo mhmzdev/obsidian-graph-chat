@@ -1,6 +1,6 @@
 import { App, TFile } from "obsidian";
 import type { GraphChatSettings } from "../main";
-import { allChatFolders } from "../main";
+import { isChatPath } from "../main";
 
 export type VaultNodeKind = "note" | "tag" | "chat";
 
@@ -24,8 +24,7 @@ export interface VaultGraph {
 
 function kindOf(path: string, settings: GraphChatSettings): VaultNodeKind {
   if (path.startsWith(settings.tagsFolder + "/")) return "tag";
-  if (allChatFolders(settings).some((f) => path.startsWith(f + "/")))
-    return "chat";
+  if (isChatPath(settings, path)) return "chat";
   return "note";
 }
 
@@ -34,7 +33,7 @@ function included(path: string, settings: GraphChatSettings): boolean {
   return (
     settings.includeFolders.some((f) => path.startsWith(f + "/")) ||
     path.startsWith(settings.tagsFolder + "/") ||
-    allChatFolders(settings).some((f) => path.startsWith(f + "/"))
+    isChatPath(settings, path)
   );
 }
 
