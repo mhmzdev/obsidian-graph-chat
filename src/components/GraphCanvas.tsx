@@ -17,10 +17,10 @@ import {
 import { TFile, Notice } from "obsidian";
 import type { App } from "obsidian";
 import type GraphChatPlugin from "../main";
-import { allChatFolders, resolveChatsFolder } from "../main";
+import { allChatFolders } from "../main";
 import { buildVaultGraph, VaultNodeKind, VaultNode } from "../graph/buildGraph";
 import { layoutGraph } from "../graph/layout";
-import { ChatThread } from "../chat/persistence";
+import { ChatThread, parseThread } from "../chat/persistence";
 import { PluginContext } from "./PluginContext";
 import { NoteNode, BranchSide } from "./NoteNode";
 import { TagNode } from "./TagNode";
@@ -316,11 +316,16 @@ function CanvasInner({
                 : anchor.position.x + CARD_WIDTH + 140,
             y: anchor.position.y + 60,
           };
+        const parentLevel =
+          typeof (anchor.data as any).level === "number"
+            ? ((anchor.data as any).level as number)
+            : 1;
         const forkThread: ChatThread = {
           sourceNotePath: snapshot.sourceNotePath,
           sessionId: "",
           forkFromSessionId: snapshot.sessionId,
           messages: [], // fresh window — context lives in the resumed session
+          level: parentLevel + 1,
         };
         const chatNode: Node = {
           id: chatId,
@@ -331,6 +336,8 @@ function CanvasInner({
             sourceNotePath: snapshot.sourceNotePath,
             initialThread: forkThread,
             anchorNodeId,
+            level: parentLevel + 1,
+            metaLoaded: true,
             onClose: closeChat,
             onFork: (() => {}) as any, // bound below
             onSessionUpdate: (() => {}) as any,
@@ -402,6 +409,8 @@ function CanvasInner({
           data: {
             sourceNotePath,
             anchorNodeId,
+            level: 1,
+            metaLoaded: true,
             onClose: closeChat,
             onFork: (() => {}) as any, // bound below
             onSessionUpdate: (() => {}) as any,
@@ -527,28 +536,31 @@ function CanvasInner({
         // ---- chat→chat: target gains the other chat's transcript as context ----
         let notePath: string;
         if (other.type === "chatCard") {
-          const levelOf = (node: Node): number => {
-            let lvl = 1;
-            let cur = node;
-            const seen = new Set<string>();
-            while (cur.type === "chatCard") {
-              const anchorId = (cur.data as any).anchorNodeId as
-                | string
-                | undefined;
-              if (!anchorId || seen.has(anchorId)) break;
-              seen.add(anchorId);
-              const anchor = ns.find((n) => n.id === anchorId);
-              if (!anchor || anchor.type !== "chatCard") break;
-              lvl++;
-              cur = anchor;
-            }
-            return lvl;
-          };
-          if (levelOf(src) === levelOf(tgt)) {
+          const la = (src.data as any).level as number | null | undefined;
+          const lb = (tgt.data as any).level as number | null | undefined;
+          if (typeof la === "number" && typeof lb === "number" && la === lb) {
             new Notice(
               "Same-level chats can't be linked — link across levels instead."
             );
             return;
+          }
+          // linking an orphan under a leveled chat adopts it one level below
+          if (typeof la === "number" && typeof lb !== "number") {
+            setNodes((all) =>
+              all.map((n) =>
+                n.id === tgt.id
+                  ? { ...n, data: { ...n.data, level: la + 1 } }
+                  : n
+              )
+            );
+          } else if (typeof lb === "number" && typeof la !== "number") {
+            setNodes((all) =>
+              all.map((n) =>
+                n.id === src.id
+                  ? { ...n, data: { ...n.data, level: lb + 1 } }
+                  : n
+              )
+            );
           }
           const p =
             ((other.data as any).filePath as string | undefined) ??
@@ -739,11 +751,21 @@ function CanvasInner({
             setNodes((all) =>
               all.map((n) =>
                 n.id === chatNode.id
-                  ? { ...n, data: { ...n.data, sourceDetached: true } }
+                  ? { ...n, data: { ...n.data, sourceDetached: true, level: null } }
                   : n
               )
             );
             new Notice("Chat detached — it now stands alone.");
+          }
+          // cutting a branch edge orphans the child chat — level cleared
+          if (e.className === "gc-edge-chat" && tgt?.type === "chatCard") {
+            setNodes((all) =>
+              all.map((n) =>
+                n.id === tgt.id
+                  ? { ...n, data: { ...n.data, level: null } }
+                  : n
+              )
+            );
           }
           // never-used ephemeral card cut loose → nothing to keep, remove it
           if (
@@ -882,13 +904,15 @@ function CanvasInner({
 
   // ---- semantic zoom: folder overview ----
   const folderOf = useCallback(
-    (n: Node): string =>
-      n.id.includes("/")
-        ? n.id.split("/")[0]
-        : resolveChatsFolder(
-            plugin.settings,
-            ((n.data as any).sourceNotePath as string) ?? ""
-          ).split("/")[0],
+    (n: Node): string => {
+      if (n.type === "chatCard") {
+        // chats belong to the folder of the note they came from
+        const srcp = (n.data as any).sourceNotePath as string | undefined;
+        if (srcp && srcp.includes("/")) return srcp.split("/")[0];
+        return plugin.settings.chatsFolder.split("/")[0];
+      }
+      return n.id.split("/")[0];
+    },
     [plugin]
   );
 
@@ -976,6 +1000,44 @@ function CanvasInner({
     );
     setFolderNodes(fNodes);
   }, [zoomedOut, folderOf, openFolder, plugin]);
+
+  // chat notes on disk: load Source/Level/Tags into node data even when the
+  // card itself is culled off-screen (grouping and link rules depend on it)
+  useEffect(() => {
+    const pending = nodes.filter(
+      (n) =>
+        n.type === "chatCard" &&
+        (n.data as any).loadPath &&
+        !(n.data as any).metaLoaded
+    );
+    if (pending.length === 0) return;
+    for (const n of pending) {
+      const lp = (n.data as any).loadPath as string;
+      const f = app.vault.getAbstractFileByPath(lp);
+      if (!(f instanceof TFile)) continue;
+      void app.vault.cachedRead(f).then((content) => {
+        const t = parseThread(lp, content);
+        setNodes((all) =>
+          all.map((x) =>
+            x.id === n.id
+              ? {
+                  ...x,
+                  data: {
+                    ...x.data,
+                    metaLoaded: true,
+                    sourceNotePath: t?.sourceNotePath ?? "",
+                    level: t?.level ?? null,
+                    linkedTags: t?.tags ?? [],
+                    currentSessionId:
+                      t?.sessionId || (x.data as any).currentSessionId,
+                  },
+                }
+              : x
+          )
+        );
+      });
+    }
+  }, [nodes, app]);
 
   // dragging a folder card moves every node in that folder by the same delta
   const onNodeDragStop = useCallback(

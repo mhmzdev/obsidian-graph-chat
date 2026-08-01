@@ -30,8 +30,10 @@ function kindOf(path: string, settings: GraphChatSettings): VaultNodeKind {
 }
 
 function included(path: string, settings: GraphChatSettings): boolean {
+  if (settings.includeAll) return true;
   return (
     settings.includeFolders.some((f) => path.startsWith(f + "/")) ||
+    path.startsWith(settings.tagsFolder + "/") ||
     allChatFolders(settings).some((f) => path.startsWith(f + "/"))
   );
 }

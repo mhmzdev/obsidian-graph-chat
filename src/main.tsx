@@ -1,8 +1,10 @@
 import {
   App,
+  Notice,
   Plugin,
   PluginSettingTab,
   Setting,
+  TFolder,
   WorkspaceLeaf,
 } from "obsidian";
 import { GraphChatView, VIEW_TYPE_GRAPH_CHAT } from "./view";
@@ -20,7 +22,9 @@ export interface ChatRoute {
 export interface GraphChatSettings {
   claudePath: string;
   chatsFolder: string;
-  /** Vault folders included in the graph. Tags folder renders as hub nodes. */
+  /** true → every vault folder is in the graph */
+  includeAll: boolean;
+  /** Vault folders included in the graph when includeAll is off. */
   includeFolders: string[];
   tagsFolder: string;
   /** models offered in the chat dropdown; first entry is the default */
@@ -29,9 +33,17 @@ export interface GraphChatSettings {
   chatRoutes: ChatRoute[];
 }
 
+export const KNOWN_MODELS: ModelOption[] = [
+  { label: "Sonnet", value: "sonnet" },
+  { label: "Fable 5", value: "claude-fable-5" },
+  { label: "Opus", value: "opus" },
+  { label: "Haiku", value: "haiku" },
+];
+
 const DEFAULT_SETTINGS: GraphChatSettings = {
   claudePath: "/Users/hamza/.local/bin/claude",
   chatsFolder: "Chats",
+  includeAll: false,
   includeFolders: ["0 - Everything", "Tags", "Chats"],
   tagsFolder: "Tags",
   models: [
@@ -55,6 +67,7 @@ export function resolveChatsFolder(
 ): string {
   let best: ChatRoute | null = null;
   for (const r of s.chatRoutes) {
+    if (!r.sourceFolder || !r.chatsFolder) continue;
     if (
       sourceNotePath.startsWith(r.sourceFolder + "/") &&
       (!best || r.sourceFolder.length > best.sourceFolder.length)
@@ -134,6 +147,16 @@ class GraphChatSettingTab extends PluginSettingTab {
   display(): void {
     const { containerEl } = this;
     containerEl.empty();
+    const S = this.plugin.settings;
+    const save = () => this.plugin.saveSettings();
+
+    const folders = this.app.vault
+      .getAllLoadedFiles()
+      .filter((f): f is TFolder => f instanceof TFolder)
+      .map((f) => f.path)
+      .filter((p) => p && p !== "/" && !p.startsWith("."))
+      .sort();
+    const topLevel = folders.filter((p) => !p.includes("/"));
 
     containerEl.createEl("p", {
       text: "Reopen the Graph Chat view after changing settings.",
@@ -144,89 +167,198 @@ class GraphChatSettingTab extends PluginSettingTab {
       .setName("Claude CLI path")
       .setDesc("Absolute path to the claude binary (run `which claude`).")
       .addText((t) =>
-        t.setValue(this.plugin.settings.claudePath).onChange(async (v) => {
-          this.plugin.settings.claudePath = v.trim();
-          await this.plugin.saveSettings();
+        t.setValue(S.claudePath).onChange(async (v) => {
+          S.claudePath = v.trim();
+          await save();
         })
       );
 
     new Setting(containerEl)
       .setName("Default chats folder")
       .setDesc("Where chat notes are saved unless a routing rule matches.")
+      .addDropdown((dd) => {
+        for (const f of folders) dd.addOption(f, f);
+        if (!folders.includes(S.chatsFolder))
+          dd.addOption(S.chatsFolder, S.chatsFolder + " (will be created)");
+        dd.setValue(S.chatsFolder).onChange(async (v) => {
+          S.chatsFolder = v;
+          await save();
+        });
+      });
+
+    // ---- chat folder routing: table of rules ----
+    new Setting(containerEl)
+      .setName("Chat folder routing")
+      .setDesc(
+        "Chats started from notes under the source folder are stored in the destination folder (created if missing). Longest match wins; everything else uses the default folder."
+      )
+      .setHeading();
+
+    S.chatRoutes.forEach((r, i) => {
+      new Setting(containerEl)
+        .addDropdown((dd) => {
+          dd.addOption("", "— source folder —");
+          for (const f of folders) dd.addOption(f, f);
+          dd.setValue(r.sourceFolder).onChange(async (v) => {
+            r.sourceFolder = v;
+            await save();
+          });
+        })
+        .addText((t) =>
+          t
+            .setPlaceholder("destination, e.g. 0 - Everything/research")
+            .setValue(r.chatsFolder)
+            .onChange(async (v) => {
+              r.chatsFolder = v.trim().replace(/\/$/, "");
+              await save();
+            })
+        )
+        .addExtraButton((b) =>
+          b
+            .setIcon("trash")
+            .setTooltip("Remove rule")
+            .onClick(async () => {
+              S.chatRoutes.splice(i, 1);
+              await save();
+              this.display();
+            })
+        );
+    });
+
+    new Setting(containerEl).addButton((b) =>
+      b.setButtonText("Add routing rule").onClick(async () => {
+        S.chatRoutes.push({ sourceFolder: "", chatsFolder: "" });
+        await save();
+        this.display();
+      })
+    );
+
+    // ---- models: toggle checklist + custom entries ----
+    new Setting(containerEl)
+      .setName("Models")
+      .setDesc(
+        "Toggle the models offered in the chat dropdown. Other CLIs (Codex, GLM, …) need provider adapters — planned, not available yet."
+      )
+      .setHeading();
+
+    const isEnabled = (value: string) =>
+      S.models.some((m) => m.value === value);
+
+    for (const km of KNOWN_MODELS) {
+      new Setting(containerEl)
+        .setName(km.label)
+        .setDesc(km.value)
+        .addToggle((tg) =>
+          tg.setValue(isEnabled(km.value)).onChange(async (on) => {
+            if (on) {
+              if (!isEnabled(km.value)) S.models.push({ ...km });
+            } else {
+              if (S.models.length <= 1) {
+                new Notice("At least one model must stay enabled.");
+                tg.setValue(true);
+                return;
+              }
+              S.models = S.models.filter((m) => m.value !== km.value);
+            }
+            await save();
+            this.display();
+          })
+        );
+    }
+
+    const customs = S.models.filter(
+      (m) => !KNOWN_MODELS.some((km) => km.value === m.value)
+    );
+    for (const cm of customs) {
+      new Setting(containerEl)
+        .setName(cm.label)
+        .setDesc(cm.value + " (custom)")
+        .addExtraButton((b) =>
+          b
+            .setIcon("trash")
+            .setTooltip("Remove custom model")
+            .onClick(async () => {
+              if (S.models.length <= 1) {
+                new Notice("At least one model must stay enabled.");
+                return;
+              }
+              S.models = S.models.filter((m) => m.value !== cm.value);
+              await save();
+              this.display();
+            })
+        );
+    }
+
+    let customLabel = "";
+    let customId = "";
+    new Setting(containerEl)
+      .setName("Add custom model")
       .addText((t) =>
-        t.setValue(this.plugin.settings.chatsFolder).onChange(async (v) => {
-          this.plugin.settings.chatsFolder = v.trim() || "Chats";
-          await this.plugin.saveSettings();
+        t.setPlaceholder("Label").onChange((v) => (customLabel = v.trim()))
+      )
+      .addText((t) =>
+        t
+          .setPlaceholder("model id for --model")
+          .onChange((v) => (customId = v.trim()))
+      )
+      .addButton((b) =>
+        b.setButtonText("Add").onClick(async () => {
+          if (!customLabel || !customId) return;
+          if (!isEnabled(customId)) {
+            S.models.push({ label: customLabel, value: customId });
+            await save();
+            this.display();
+          }
         })
       );
 
     new Setting(containerEl)
-      .setName("Chat folder routing")
-      .setDesc(
-        "One rule per line: source-folder -> chats-folder. Chats started from notes under source-folder are stored in chats-folder. Longest match wins; anything else uses the default folder. Example: 0 - Everything -> 0 - Everything/research"
-      )
-      .addTextArea((t) => {
-        t.setValue(
-          this.plugin.settings.chatRoutes
-            .map((r) => `${r.sourceFolder} -> ${r.chatsFolder}`)
-            .join("\n")
-        ).onChange(async (v) => {
-          this.plugin.settings.chatRoutes = v
-            .split("\n")
-            .map((line) => line.split("->"))
-            .filter((parts) => parts.length === 2)
-            .map(([a, b]) => ({
-              sourceFolder: a.trim().replace(/\/$/, ""),
-              chatsFolder: b.trim().replace(/\/$/, ""),
-            }))
-            .filter((r) => r.sourceFolder && r.chatsFolder);
-          await this.plugin.saveSettings();
-        });
-        t.inputEl.rows = 4;
-        t.inputEl.style.width = "100%";
-      });
-
-    new Setting(containerEl)
-      .setName("Models")
-      .setDesc(
-        "One per line: Label = model-id (passed to claude --model). First entry is the default. Aliases like sonnet/opus/haiku or full ids like claude-fable-5 both work. Other CLIs (Codex, GLM, …) need provider adapters — planned, not available yet."
-      )
-      .addTextArea((t) => {
-        t.setValue(
-          this.plugin.settings.models
-            .map((m) => `${m.label} = ${m.value}`)
-            .join("\n")
-        ).onChange(async (v) => {
-          const models = v
-            .split("\n")
-            .map((line) => line.split("="))
-            .filter((parts) => parts.length === 2)
-            .map(([a, b]) => ({ label: a.trim(), value: b.trim() }))
-            .filter((m) => m.label && m.value);
-          if (models.length > 0) {
-            this.plugin.settings.models = models;
-            await this.plugin.saveSettings();
+      .setName("Default model")
+      .setDesc("Pre-selected in every new chat.")
+      .addDropdown((dd) => {
+        for (const m of S.models) dd.addOption(m.value, m.label);
+        dd.setValue(S.models[0]?.value ?? "").onChange(async (v) => {
+          const idx = S.models.findIndex((m) => m.value === v);
+          if (idx > 0) {
+            const [m] = S.models.splice(idx, 1);
+            S.models.unshift(m);
+            await save();
           }
         });
-        t.inputEl.rows = 5;
-        t.inputEl.style.width = "100%";
       });
 
+    // ---- included folders: all vs selected checklist ----
     new Setting(containerEl)
       .setName("Included folders")
       .setDesc(
-        "Comma-separated top-level folders shown in the graph (chat folders are always included)."
+        "Which folders appear in the graph. Tags and chat folders are always included."
       )
-      .addText((t) =>
-        t
-          .setValue(this.plugin.settings.includeFolders.join(", "))
-          .onChange(async (v) => {
-            this.plugin.settings.includeFolders = v
-              .split(",")
-              .map((s) => s.trim().replace(/\/$/, ""))
-              .filter(Boolean);
-            await this.plugin.saveSettings();
-          })
+      .setHeading();
+
+    new Setting(containerEl)
+      .setName("Include all folders")
+      .addToggle((tg) =>
+        tg.setValue(S.includeAll).onChange(async (v) => {
+          S.includeAll = v;
+          await save();
+          this.display();
+        })
       );
+
+    if (!S.includeAll) {
+      for (const f of topLevel) {
+        if (f === S.tagsFolder) continue;
+        new Setting(containerEl).setName(f).addToggle((tg) =>
+          tg.setValue(S.includeFolders.includes(f)).onChange(async (on) => {
+            if (on) {
+              if (!S.includeFolders.includes(f)) S.includeFolders.push(f);
+            } else {
+              S.includeFolders = S.includeFolders.filter((x) => x !== f);
+            }
+            await save();
+          })
+        );
+      }
+    }
   }
 }

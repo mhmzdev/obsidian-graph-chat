@@ -16,6 +16,8 @@ export interface ChatThread {
   title?: string;
   /** tag basenames linked onto this chat (stored on the Tags: line) */
   tags?: string[];
+  /** branch depth (1 = chat from a note). Undefined = orphan, attachable anywhere. */
+  level?: number;
 }
 
 function slug(s: string): string {
@@ -64,8 +66,11 @@ export async function saveThread(
   if (sourceBase) {
     lines.push(`Source: [[${sourceBase}]]`);
   }
+  lines.push(`Session: ${thread.sessionId || "pending"}`);
+  if (typeof thread.level === "number") {
+    lines.push(`Level: ${thread.level}`);
+  }
   lines.push(
-    `Session: ${thread.sessionId || "pending"}`,
     `Updated: ${today()}`,
     "",
     `# ${thread.title ?? (sourceBase ? `Chat — ${sourceBase}` : "Chat")}`,
@@ -148,6 +153,7 @@ export function parseThread(
   const tags = [...tagsLine.matchAll(/\[\[([^\]|]+)(\|[^\]]*)?\]\]/g)].map(
     (m) => m[1]
   );
+  const levelMatch = content.match(/^Level: (\d+)$/m);
   return {
     sourceNotePath: sourceMatch ? sourceMatch[1] + ".md" : "",
     sessionId: sessionId && sessionId !== "pending" ? sessionId : "",
@@ -155,5 +161,6 @@ export function parseThread(
     filePath,
     title: heading && !heading.startsWith("Chat — ") ? heading : undefined,
     tags: tags.length > 0 ? tags : undefined,
+    level: levelMatch ? parseInt(levelMatch[1], 10) : undefined,
   };
 }

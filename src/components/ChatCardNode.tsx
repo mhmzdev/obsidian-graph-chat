@@ -41,6 +41,8 @@ export interface ChatCardData {
   filePath?: string;
   /** set by the canvas when the Source link edge is deleted */
   sourceDetached?: boolean;
+  /** branch depth; null = detached orphan (attachable anywhere) */
+  level?: number | null;
   onClose: (nodeId: string) => void;
   onFork: (nodeId: string, side: BranchSide, snapshot: ForkSnapshot) => void;
   onSessionUpdate: (nodeId: string, sessionId: string) => void;
@@ -150,6 +152,19 @@ export function ChatCardNode({ id, data }: NodeProps) {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // level lives on node data (canvas assigns/clears it) — mirror into the
+  // thread so it persists as the Level: line
+  useEffect(() => {
+    if (d.level === undefined) return;
+    const want = d.level === null ? undefined : d.level;
+    if (threadRef.current.level === want) return;
+    threadRef.current.level = want;
+    if (threadRef.current.filePath || threadRef.current.messages.length > 0) {
+      void persist();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [d.level]);
 
   // Source edge deleted on the canvas → the chat stands alone from now on.
   useEffect(() => {
