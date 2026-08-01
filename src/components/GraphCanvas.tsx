@@ -11,6 +11,7 @@ import {
   NodeChange,
   EdgeChange,
   useReactFlow,
+  useStore,
   FinalConnectionState,
 } from "@xyflow/react";
 import { TFile, Notice } from "obsidian";
@@ -23,14 +24,18 @@ import { PluginContext } from "./PluginContext";
 import { NoteNode, BranchSide } from "./NoteNode";
 import { TagNode } from "./TagNode";
 import { ChatCardNode, ForkSnapshot } from "./ChatCardNode";
+import { FolderNode } from "./FolderNode";
 
 const nodeTypes = {
   note: NoteNode,
   tag: TagNode,
   chatCard: ChatCardNode,
+  folder: FolderNode,
 };
 
 const CARD_WIDTH = 380;
+/** below this zoom the canvas collapses into folder overview cards */
+const OVERVIEW_ZOOM = 0.32;
 let chatCounter = 0;
 
 /** Insert a [[link]] into the note's Tags: line (create one if missing). */
@@ -73,7 +78,10 @@ function CanvasInner({
   plugin: GraphChatPlugin;
 }) {
   const ctx = useMemo(() => ({ app, plugin }), [app, plugin]);
-  const { screenToFlowPosition } = useReactFlow();
+  const { screenToFlowPosition, setCenter } = useReactFlow();
+  // semantic zoom: far out → folder overview (boolean selector = re-render
+  // only when crossing the threshold, not on every zoom frame)
+  const zoomedOut = useStore((s) => s.transform[2] < OVERVIEW_ZOOM);
   // saved chats the user hid this session (✕) — live sync won't re-add them
   const closedChatsRef = useRef<Set<string>>(new Set());
 
@@ -736,6 +744,14 @@ function CanvasInner({
             );
             new Notice("Chat detached — it now stands alone.");
           }
+          // never-used ephemeral card cut loose → nothing to keep, remove it
+          if (
+            e.className === "gc-edge-chat" &&
+            !chatNode.id.includes("/") &&
+            !(chatNode.data as any).filePath
+          ) {
+            setNodes((all) => all.filter((n) => n.id !== chatNode.id));
+          }
           continue;
         }
 
@@ -833,9 +849,11 @@ function CanvasInner({
       edges.map((e) => {
         const glow = highlight?.edges.has(e.id) ?? false;
         const flow = selectedIds.has(e.source) || selectedIds.has(e.target);
-        if (!glow && !flow) return e;
+        // narrow hit zone: edges stay clickable but stop eating pan gestures
+        if (!glow && !flow) return { ...e, interactionWidth: 6 };
         return {
           ...e,
+          interactionWidth: 6,
           animated: true,
           className: [e.className, glow && "gc-edge-glow", flow && "gc-edge-flow"]
             .filter(Boolean)
@@ -855,12 +873,94 @@ function CanvasInner({
     []
   );
 
+  // ---- semantic zoom: folder overview ----
+  const folderOf = useCallback(
+    (n: Node): string =>
+      n.id.includes("/") ? n.id.split("/")[0] : plugin.settings.chatsFolder,
+    [plugin]
+  );
+
+  const openFolder = useCallback(
+    (folderId: string) => {
+      const name = folderId.replace(/^folder:/, "");
+      const members = nodesRef.current.filter((n) => folderOf(n) === name);
+      if (members.length === 0) return;
+      const cx =
+        members.reduce((s, n) => s + n.position.x, 0) / members.length;
+      const cy =
+        members.reduce((s, n) => s + n.position.y, 0) / members.length;
+      void setCenter(cx, cy, { zoom: 0.75, duration: 500 });
+    },
+    [folderOf, setCenter]
+  );
+
+  const overview = useMemo(() => {
+    if (!zoomedOut) return null;
+    const groups = new Map<string, Node[]>();
+    for (const n of nodes) {
+      const f = folderOf(n);
+      if (!groups.has(f)) groups.set(f, []);
+      groups.get(f)!.push(n);
+    }
+    const folderNodes: Node[] = [...groups.entries()].map(([name, members]) => {
+      const cx =
+        members.reduce((s, n) => s + n.position.x, 0) / members.length;
+      const cy =
+        members.reduce((s, n) => s + n.position.y, 0) / members.length;
+      const countLabel =
+        name === plugin.settings.tagsFolder
+          ? "tags"
+          : name === plugin.settings.chatsFolder
+          ? "chats"
+          : "notes";
+      return {
+        id: `folder:${name}`,
+        type: "folder",
+        position: { x: cx, y: cy },
+        draggable: false,
+        deletable: false,
+        data: {
+          name,
+          count: members.length,
+          countLabel,
+          onOpen: openFolder,
+        },
+      };
+    });
+    const folderOfId = (id: string) => {
+      const n = nodes.find((x) => x.id === id);
+      return n ? folderOf(n) : null;
+    };
+    const pairCounts = new Map<string, number>();
+    for (const e of edges) {
+      const a = folderOfId(e.source);
+      const b = folderOfId(e.target);
+      if (!a || !b || a === b) continue;
+      const key = a < b ? `${a}|${b}` : `${b}|${a}`;
+      pairCounts.set(key, (pairCounts.get(key) ?? 0) + 1);
+    }
+    const folderEdges: Edge[] = [...pairCounts.entries()].map(
+      ([key, count]) => {
+        const [a, b] = key.split("|");
+        return {
+          id: `folderedge:${key}`,
+          source: `folder:${a}`,
+          target: `folder:${b}`,
+          className: "gc-edge-folder",
+          style: { strokeWidth: Math.min(8, 1 + count / 4) },
+          label: String(count),
+        };
+      }
+    );
+    return { folderNodes, folderEdges };
+  }, [zoomedOut, nodes, edges, folderOf, openFolder, plugin]);
+
   return (
     <PluginContext.Provider value={ctx}>
       <div className="gc-canvas-wrap">
         <ReactFlow
-          nodes={boundNodes}
-          edges={displayEdges}
+          nodes={overview ? overview.folderNodes : boundNodes}
+          edges={overview ? overview.folderEdges : displayEdges}
           nodeTypes={nodeTypes}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
@@ -871,6 +971,7 @@ function CanvasInner({
           onPaneClick={() => setHighlight(null)}
           connectOnClick={false}
           deleteKeyCode={["Backspace", "Delete"]}
+          onlyRenderVisibleElements
           fitView
           minZoom={0.05}
           maxZoom={2.5}

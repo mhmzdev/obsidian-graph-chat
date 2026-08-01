@@ -414,13 +414,6 @@ export function ChatCardNode({ id, data }: NodeProps) {
           >
             <Icon name="file-text" size={13} />
           </button>
-          <button
-            className="gc-header-btn"
-            title="Hide card (chat stays saved)"
-            onClick={() => d.onClose(id)}
-          >
-            <Icon name="x" size={13} />
-          </button>
         </span>
       </div>
       <div className="gc-chat-messages" ref={scrollRef}>
