@@ -276,9 +276,13 @@ function CanvasInner({
   }, []);
 
   const cardSaved = useCallback((nodeId: string, filePath: string) => {
+    // loadPath makes the card recoverable: overview swaps and viewport
+    // culling unmount cards, and remounts rehydrate from this file
     setNodes((ns) =>
       ns.map((n) =>
-        n.id === nodeId ? { ...n, data: { ...n.data, filePath } } : n
+        n.id === nodeId
+          ? { ...n, data: { ...n.data, filePath, loadPath: filePath } }
+          : n
       )
     );
   }, []);
