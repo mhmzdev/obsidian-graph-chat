@@ -99,18 +99,19 @@ export async function saveThread(
  */
 export async function renameThreadFile(
   app: App,
-  chatsFolder: string,
   thread: ChatThread,
   title: string
 ): Promise<string | null> {
   if (!thread.filePath) return null;
   const f = app.vault.getAbstractFileByPath(thread.filePath);
   if (!(f instanceof TFile)) return null;
+  // stay in whatever folder the chat already lives in
+  const folder = thread.filePath.split("/").slice(0, -1).join("/");
   const base = `chat - ${slug(title) || "thread"}`;
-  let candidate = normalizePath(`${chatsFolder}/${base}.md`);
+  let candidate = normalizePath(`${folder}/${base}.md`);
   if (candidate === thread.filePath) return thread.filePath;
   for (let i = 2; app.vault.getAbstractFileByPath(candidate); i++) {
-    candidate = normalizePath(`${chatsFolder}/${base} ${i}.md`);
+    candidate = normalizePath(`${folder}/${base} ${i}.md`);
   }
   await app.fileManager.renameFile(f, candidate);
   thread.filePath = candidate;

@@ -17,6 +17,7 @@ import {
   ChatMessage,
 } from "../chat/persistence";
 import type { BranchSide } from "./NoteNode";
+import { resolveChatsFolder } from "../main";
 
 export interface ForkSnapshot {
   sourceNotePath: string;
@@ -47,13 +48,6 @@ export interface ChatCardData {
   onTagsLoaded: (nodeId: string, tags: string[]) => void;
   [key: string]: unknown;
 }
-
-const MODELS: { label: string; value: string }[] = [
-  { label: "Sonnet", value: "sonnet" },
-  { label: "Fable 5", value: "claude-fable-5" },
-  { label: "Opus", value: "opus" },
-  { label: "Haiku", value: "haiku" },
-];
 
 const INPUT_MAX_HEIGHT = 110; // ~5 lines
 
@@ -114,10 +108,11 @@ export function ChatCardNode({ id, data }: NodeProps) {
   const [messages, setMessages] = useState<ChatMessage[]>(
     threadRef.current.messages
   );
+  const MODELS = plugin.settings.models;
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [model, setModel] = useState("sonnet");
+  const [model, setModel] = useState(MODELS[0]?.value ?? "sonnet");
   const [menuOpen, setMenuOpen] = useState(false);
   const [savedPath, setSavedPath] = useState<string | null>(
     threadRef.current.filePath ?? d.loadPath ?? null
@@ -212,13 +207,14 @@ export function ChatCardNode({ id, data }: NodeProps) {
     el.style.height = Math.min(el.scrollHeight, INPUT_MAX_HEIGHT) + "px";
   };
 
+  const chatsFolder = resolveChatsFolder(
+    plugin.settings,
+    threadRef.current.sourceNotePath
+  );
+
   const persist = async () => {
     try {
-      const path = await saveThread(
-        app,
-        plugin.settings.chatsFolder,
-        threadRef.current
-      );
+      const path = await saveThread(app, chatsFolder, threadRef.current);
       setSavedPath(path);
       d.onSaved(id, path);
     } catch (e: any) {
@@ -231,12 +227,7 @@ export function ChatCardNode({ id, data }: NodeProps) {
     threadRef.current.title = t;
     if (!threadRef.current.filePath && threadRef.current.messages.length === 0)
       return;
-    const renamed = await renameThreadFile(
-      app,
-      plugin.settings.chatsFolder,
-      threadRef.current,
-      t
-    );
+    const renamed = await renameThreadFile(app, threadRef.current, t);
     await persist();
     if (renamed) {
       setSavedPath(renamed);
@@ -414,6 +405,15 @@ export function ChatCardNode({ id, data }: NodeProps) {
           >
             <Icon name="file-text" size={13} />
           </button>
+          {!savedPath && (
+            <button
+              className="gc-header-btn"
+              title="Discard this chat box (nothing saved yet)"
+              onClick={() => d.onClose(id)}
+            >
+              <Icon name="x" size={13} />
+            </button>
+          )}
         </span>
       </div>
       <div className="gc-chat-messages" ref={scrollRef}>
@@ -428,7 +428,7 @@ export function ChatCardNode({ id, data }: NodeProps) {
             <div className="gc-chat-empty">
               Ask anything about <b>{sourceName}</b> — Claude reads your vault
               (read-only). The thread saves automatically to{" "}
-              <b>{plugin.settings.chatsFolder}/</b>.
+              <b>{chatsFolder}/</b>.
             </div>
           ))}
         {messages.map((m, i) => (

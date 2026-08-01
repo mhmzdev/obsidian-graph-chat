@@ -1,5 +1,6 @@
 import { App, TFile } from "obsidian";
 import type { GraphChatSettings } from "../main";
+import { allChatFolders } from "../main";
 
 export type VaultNodeKind = "note" | "tag" | "chat";
 
@@ -23,12 +24,16 @@ export interface VaultGraph {
 
 function kindOf(path: string, settings: GraphChatSettings): VaultNodeKind {
   if (path.startsWith(settings.tagsFolder + "/")) return "tag";
-  if (path.startsWith(settings.chatsFolder + "/")) return "chat";
+  if (allChatFolders(settings).some((f) => path.startsWith(f + "/")))
+    return "chat";
   return "note";
 }
 
 function included(path: string, settings: GraphChatSettings): boolean {
-  return settings.includeFolders.some((f) => path.startsWith(f + "/"));
+  return (
+    settings.includeFolders.some((f) => path.startsWith(f + "/")) ||
+    allChatFolders(settings).some((f) => path.startsWith(f + "/"))
+  );
 }
 
 /**

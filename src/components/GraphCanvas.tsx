@@ -17,6 +17,7 @@ import {
 import { TFile, Notice } from "obsidian";
 import type { App } from "obsidian";
 import type GraphChatPlugin from "../main";
+import { allChatFolders, resolveChatsFolder } from "../main";
 import { buildVaultGraph, VaultNodeKind, VaultNode } from "../graph/buildGraph";
 import { layoutGraph } from "../graph/layout";
 import { ChatThread } from "../chat/persistence";
@@ -428,10 +429,10 @@ function CanvasInner({
   /** Saved chat notes (paths) whose Source links to this note. Synchronous. */
   const chatNotesLinkedTo = useCallback(
     (notePath: string): string[] => {
-      const prefix = plugin.settings.chatsFolder + "/";
+      const prefixes = allChatFolders(plugin.settings).map((f) => f + "/");
       return app.vault
         .getMarkdownFiles()
-        .filter((f) => f.path.startsWith(prefix))
+        .filter((f) => prefixes.some((p) => f.path.startsWith(p)))
         .filter(
           (f) => notePath in (app.metadataCache.resolvedLinks[f.path] ?? {})
         )
@@ -864,8 +865,14 @@ function CanvasInner({
   );
 
   const onNodesChange = useCallback(
-    (changes: NodeChange[]) => setNodes((ns) => applyNodeChanges(changes, ns)),
-    []
+    (changes: NodeChange[]) => {
+      if (zoomedOut) {
+        setFolderNodes((ns) => applyNodeChanges(changes, ns));
+      } else {
+        setNodes((ns) => applyNodeChanges(changes, ns));
+      }
+    },
+    [zoomedOut]
   );
 
   const onEdgesChange = useCallback(
@@ -876,7 +883,12 @@ function CanvasInner({
   // ---- semantic zoom: folder overview ----
   const folderOf = useCallback(
     (n: Node): string =>
-      n.id.includes("/") ? n.id.split("/")[0] : plugin.settings.chatsFolder,
+      n.id.includes("/")
+        ? n.id.split("/")[0]
+        : resolveChatsFolder(
+            plugin.settings,
+            ((n.data as any).sourceNotePath as string) ?? ""
+          ).split("/")[0],
     [plugin]
   );
 
@@ -894,15 +906,25 @@ function CanvasInner({
     [folderOf, setCenter]
   );
 
-  const overview = useMemo(() => {
-    if (!zoomedOut) return null;
+  // overview lives in its own state so folder cards are draggable —
+  // dragging one moves its whole cluster on drop
+  const [folderNodes, setFolderNodes] = useState<Node[]>([]);
+  const [folderEdges, setFolderEdges] = useState<Edge[]>([]);
+  const edgesRef = useRef(edges);
+  useEffect(() => {
+    edgesRef.current = edges;
+  }, [edges]);
+
+  useEffect(() => {
+    if (!zoomedOut) return;
+    const ns = nodesRef.current;
     const groups = new Map<string, Node[]>();
-    for (const n of nodes) {
+    for (const n of ns) {
       const f = folderOf(n);
       if (!groups.has(f)) groups.set(f, []);
       groups.get(f)!.push(n);
     }
-    const folderNodes: Node[] = [...groups.entries()].map(([name, members]) => {
+    const fNodes: Node[] = [...groups.entries()].map(([name, members]) => {
       const cx =
         members.reduce((s, n) => s + n.position.x, 0) / members.length;
       const cy =
@@ -910,37 +932,37 @@ function CanvasInner({
       const countLabel =
         name === plugin.settings.tagsFolder
           ? "tags"
-          : name === plugin.settings.chatsFolder
+          : name === plugin.settings.chatsFolder.split("/")[0]
           ? "chats"
           : "notes";
       return {
         id: `folder:${name}`,
         type: "folder",
         position: { x: cx, y: cy },
-        draggable: false,
         deletable: false,
         data: {
           name,
           count: members.length,
           countLabel,
+          centroid: { x: cx, y: cy },
           onOpen: openFolder,
         },
       };
     });
     const folderOfId = (id: string) => {
-      const n = nodes.find((x) => x.id === id);
+      const n = ns.find((x) => x.id === id);
       return n ? folderOf(n) : null;
     };
     const pairCounts = new Map<string, number>();
-    for (const e of edges) {
+    for (const e of edgesRef.current) {
       const a = folderOfId(e.source);
       const b = folderOfId(e.target);
       if (!a || !b || a === b) continue;
       const key = a < b ? `${a}|${b}` : `${b}|${a}`;
       pairCounts.set(key, (pairCounts.get(key) ?? 0) + 1);
     }
-    const folderEdges: Edge[] = [...pairCounts.entries()].map(
-      ([key, count]) => {
+    setFolderEdges(
+      [...pairCounts.entries()].map(([key, count]) => {
         const [a, b] = key.split("|");
         return {
           id: `folderedge:${key}`,
@@ -950,24 +972,60 @@ function CanvasInner({
           style: { strokeWidth: Math.min(8, 1 + count / 4) },
           label: String(count),
         };
-      }
+      })
     );
-    return { folderNodes, folderEdges };
-  }, [zoomedOut, nodes, edges, folderOf, openFolder, plugin]);
+    setFolderNodes(fNodes);
+  }, [zoomedOut, folderOf, openFolder, plugin]);
+
+  // dragging a folder card moves every node in that folder by the same delta
+  const onNodeDragStop = useCallback(
+    (_e: unknown, node: Node) => {
+      if (node.type === "folder") {
+        const name = (node.data as any).name as string;
+        const centroid = (node.data as any).centroid as { x: number; y: number };
+        const dx = node.position.x - centroid.x;
+        const dy = node.position.y - centroid.y;
+        if (dx !== 0 || dy !== 0) {
+          setNodes((ns) =>
+            ns.map((n) =>
+              folderOf(n) === name
+                ? {
+                    ...n,
+                    position: {
+                      x: n.position.x + dx,
+                      y: n.position.y + dy,
+                    },
+                  }
+                : n
+            )
+          );
+          setFolderNodes((fs) =>
+            fs.map((f) =>
+              f.id === node.id
+                ? { ...f, data: { ...f.data, centroid: { ...node.position } } }
+                : f
+            )
+          );
+        }
+      }
+      persistPositions();
+    },
+    [folderOf, persistPositions]
+  );
 
   return (
     <PluginContext.Provider value={ctx}>
       <div className="gc-canvas-wrap">
         <ReactFlow
-          nodes={overview ? overview.folderNodes : boundNodes}
-          edges={overview ? overview.folderEdges : displayEdges}
+          nodes={zoomedOut ? folderNodes : boundNodes}
+          edges={zoomedOut ? folderEdges : displayEdges}
           nodeTypes={nodeTypes}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onEdgesDelete={onEdgesDelete}
           onConnect={onConnect}
           onConnectEnd={onConnectEnd}
-          onNodeDragStop={persistPositions}
+          onNodeDragStop={onNodeDragStop}
           onPaneClick={() => setHighlight(null)}
           connectOnClick={false}
           deleteKeyCode={["Backspace", "Delete"]}
