@@ -148,7 +148,7 @@ function CanvasInner({
   const [nodes, setNodes] = useState<Node[]>(initial.nodes);
   const [edges, setEdges] = useState<Edge[]>(initial.edges);
   const [highlight, setHighlight] = useState<Highlight | null>(null);
-  const [hoverId, setHoverId] = useState<string | null>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
   const nodesRef = useRef(nodes);
   useEffect(() => {
     nodesRef.current = nodes;
@@ -875,30 +875,12 @@ function CanvasInner({
     [nodes]
   );
 
-  // hover = focus lens (native-graph style): everything outside the hovered
-  // + selected neighborhoods dims. Selection alone never dims the canvas.
-  const focus = useMemo(() => {
-    if (hoverId === null) return null;
-    const active = new Set<string>([hoverId, ...selectedIds]);
-    const nodesIn = new Set<string>(active);
-    const edgesIn = new Set<string>();
-    for (const e of edges) {
-      if (active.has(e.source) || active.has(e.target)) {
-        edgesIn.add(e.id);
-        nodesIn.add(e.source);
-        nodesIn.add(e.target);
-      }
-    }
-    return { nodes: nodesIn, edges: edgesIn };
-  }, [hoverId, selectedIds, edges]);
-
   const boundNodes = useMemo(
     () =>
       nodes.map((rawNode) => {
         const n = { ...rawNode, deletable: false }; // Delete key is for edges only
         const classes: string[] = [];
         if (highlight?.nodes.has(n.id)) classes.push("gc-glow");
-        if (focus !== null && !focus.nodes.has(n.id)) classes.push("gc-dim");
         if (n.type !== "chatCard" && activeAnchors.has(n.id))
           classes.push("gc-anchor-active");
         const className = classes.join(" ") || undefined;
@@ -931,7 +913,6 @@ function CanvasInner({
       tagsLoaded,
       highlight,
       activeAnchors,
-      focus,
     ]
   );
 
@@ -940,19 +921,9 @@ function CanvasInner({
     () =>
       edges.map((e) => {
         const glow = highlight?.edges.has(e.id) ?? false;
-        // tap = pinned flow (selection), hover = momentary flow
-        const flow =
-          selectedIds.has(e.source) ||
-          selectedIds.has(e.target) ||
-          (hoverId !== null && (e.source === hoverId || e.target === hoverId));
-        const dim = focus !== null && !focus.edges.has(e.id);
-        if (dim) {
-          return {
-            ...e,
-            interactionWidth: 6,
-            className: (e.className ?? "") + " gc-dim-edge",
-          };
-        }
+        // tap = pinned flow (selection); hover is handled imperatively in
+        // the DOM (applyLens) so it never re-renders the canvas
+        const flow = selectedIds.has(e.source) || selectedIds.has(e.target);
         // narrow hit zone: edges stay clickable but stop eating pan gestures
         if (!glow && !flow) return { ...e, interactionWidth: 6 };
         return {
@@ -964,8 +935,104 @@ function CanvasInner({
             .join(" "),
         };
       }),
-    [edges, highlight, selectedIds, hoverId, focus]
+    [edges, highlight, selectedIds]
   );
+
+  // ---- focus lens, imperative: pure CSS class toggles, zero re-renders ----
+  const applyLens = useCallback(
+    (nodeId: string | null) => {
+      const root = wrapRef.current;
+      if (!root) return;
+      root.classList.toggle("gc-lens", nodeId !== null);
+      root
+        .querySelectorAll(".gc-lit, .gc-hoverflow")
+        .forEach((el) => el.classList.remove("gc-lit", "gc-hoverflow"));
+      if (nodeId === null) return;
+
+      const selected = nodesRef.current
+        .filter((n) => n.selected)
+        .map((n) => n.id);
+      const active = new Set<string>([nodeId, ...selected]);
+      const litNodes = new Set<string>(active);
+      const litEdges: { id: string; hovered: boolean }[] = [];
+      for (const e of edgesRef.current) {
+        if (active.has(e.source) || active.has(e.target)) {
+          litEdges.push({
+            id: e.id,
+            hovered: e.source === nodeId || e.target === nodeId,
+          });
+          litNodes.add(e.source);
+          litNodes.add(e.target);
+        }
+      }
+      for (const id of litNodes) {
+        root
+          .querySelector(`.react-flow__node[data-id="${CSS.escape(id)}"]`)
+          ?.classList.add("gc-lit");
+      }
+      for (const { id, hovered } of litEdges) {
+        const el = root.querySelector(
+          `.react-flow__edge[data-id="${CSS.escape(id)}"]`
+        );
+        if (el) {
+          el.classList.add("gc-lit");
+          if (hovered) el.classList.add("gc-hoverflow");
+        }
+      }
+    },
+    []
+  );
+
+  // ---- smooth, cursor-anchored zoom (native-graph feel) ----
+  const { getViewport, setViewport } = useReactFlow();
+  const zoomAnimRef = useRef<{ target: number; raf: number | null }>({
+    target: 0,
+    raf: null,
+  });
+
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      // let chat cards scroll their own content
+      if ((e.target as HTMLElement).closest(".nowheel")) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const anim = zoomAnimRef.current;
+      const vp = getViewport();
+      const cur = anim.raf !== null ? anim.target : vp.zoom;
+      const factor = Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0022));
+      anim.target = Math.min(2.5, Math.max(0.05, cur * factor));
+      const rect = el.getBoundingClientRect();
+      const px = e.clientX - rect.left;
+      const py = e.clientY - rect.top;
+      if (anim.raf === null) {
+        const step = () => {
+          const v = getViewport();
+          const dz = anim.target - v.zoom;
+          if (Math.abs(dz) < 0.0004) {
+            anim.raf = null;
+            return;
+          }
+          const nz = v.zoom + dz * 0.22;
+          const k = nz / v.zoom;
+          void setViewport({
+            zoom: nz,
+            x: px - (px - v.x) * k,
+            y: py - (py - v.y) * k,
+          });
+          anim.raf = requestAnimationFrame(step);
+        };
+        anim.raf = requestAnimationFrame(step);
+      }
+    };
+    el.addEventListener("wheel", onWheel, { passive: false, capture: true });
+    return () => {
+      el.removeEventListener("wheel", onWheel, true);
+      if (zoomAnimRef.current.raf !== null)
+        cancelAnimationFrame(zoomAnimRef.current.raf);
+    };
+  }, [getViewport, setViewport]);
 
   const onNodesChange = useCallback(
     (changes: NodeChange[]) => {
@@ -1162,7 +1229,7 @@ function CanvasInner({
 
   return (
     <PluginContext.Provider value={ctx}>
-      <div className="gc-canvas-wrap">
+      <div className="gc-canvas-wrap" ref={wrapRef}>
         <ReactFlow
           nodes={zoomedOut ? folderNodes : boundNodes}
           edges={zoomedOut ? folderEdges : displayEdges}
@@ -1173,8 +1240,9 @@ function CanvasInner({
           onConnect={onConnect}
           onConnectEnd={onConnectEnd}
           onNodeDragStop={onNodeDragStop}
-          onNodeMouseEnter={(_e, n) => setHoverId(n.id)}
-          onNodeMouseLeave={() => setHoverId(null)}
+          onNodeMouseEnter={(_e, n) => applyLens(n.id)}
+          onNodeMouseLeave={() => applyLens(null)}
+          zoomOnScroll={false}
           onPaneClick={() => setHighlight(null)}
           connectOnClick={false}
           deleteKeyCode={["Backspace", "Delete"]}
