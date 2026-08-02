@@ -157,7 +157,7 @@ export function ChatCardNode({ id, data }: NodeProps) {
       if (t.sessionId) d.onSessionUpdate(id, t.sessionId);
       d.onTagsLoaded(id, t.tags ?? []);
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- load-once on mount, re-running on dep changes would reload a card mid-edit
   }, []);
 
   // level lives on node data (canvas assigns/clears it) — mirror into the
@@ -170,7 +170,7 @@ export function ChatCardNode({ id, data }: NodeProps) {
     if (threadRef.current.filePath || threadRef.current.messages.length > 0) {
       void persist();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only re-run when d.level changes, not on every threadRef/persist identity change
   }, [d.level]);
 
   // Source edge deleted on the canvas → the chat stands alone from now on.
@@ -181,7 +181,7 @@ export function ChatCardNode({ id, data }: NodeProps) {
     if (threadRef.current.filePath || threadRef.current.messages.length > 0) {
       void persist();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only re-run when d.sourceDetached changes, not on every threadRef/persist identity change
   }, [d.sourceDetached]);
 
   // linked notes are CO-SOURCES: persisted on the chat note's Source line so
@@ -195,7 +195,7 @@ export function ChatCardNode({ id, data }: NodeProps) {
     if (threadRef.current.filePath || threadRef.current.messages.length > 0) {
       void persist();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberately keyed on the joined string, not the linkedNotes array identity
   }, [(d.linkedNotes as string[] | undefined)?.join("|")]);
 
   // linkedTags on node data is the source of truth (canvas adds/removes on
@@ -212,7 +212,7 @@ export function ChatCardNode({ id, data }: NodeProps) {
     if (threadRef.current.filePath || threadRef.current.messages.length > 0) {
       void persist();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberately keyed on the joined string, not the linkedTags array identity
   }, [linkedTags?.join("|")]);
 
   const sourceName = threadRef.current.sourceNotePath
@@ -239,8 +239,8 @@ export function ChatCardNode({ id, data }: NodeProps) {
   const autoGrow = () => {
     const el = inputRef.current;
     if (!el) return;
-    el.style.height = "auto";
-    el.style.height = Math.min(el.scrollHeight, INPUT_MAX_HEIGHT) + "px";
+    el.setCssStyles({ height: "auto" });
+    el.setCssStyles({ height: Math.min(el.scrollHeight, INPUT_MAX_HEIGHT) + "px" });
   };
 
   const chatsFolder = resolveChatsFolder(
@@ -282,7 +282,7 @@ export function ChatCardNode({ id, data }: NodeProps) {
     const text = input.trim();
     if (!text || busy) return;
     setInput("");
-    if (inputRef.current) inputRef.current.style.height = "auto";
+    if (inputRef.current) inputRef.current.setCssStyles({ height: "auto" });
     setError(null);
     setBusy(true);
 
