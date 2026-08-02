@@ -20,7 +20,11 @@ import type GraphChatPlugin from "../main";
 import { isChatPath } from "../main";
 import { buildVaultGraph, VaultNodeKind, VaultNode } from "../graph/buildGraph";
 import { layoutGraph } from "../graph/layout";
-import { ChatThread, parseThread } from "../chat/persistence";
+import {
+  ChatThread,
+  parseThread,
+  resolveSourcePath,
+} from "../chat/persistence";
 import { PluginContext } from "./PluginContext";
 import { NoteNode, BranchSide } from "./NoteNode";
 import { TagNode } from "./TagNode";
@@ -1028,7 +1032,9 @@ function CanvasInner({
                   data: {
                     ...x.data,
                     metaLoaded: true,
-                    sourceNotePath: t?.sourceNotePath ?? "",
+                    sourceNotePath: t
+                      ? resolveSourcePath(app, t.sourceNotePath, lp)
+                      : "",
                     level: t?.level ?? null,
                     linkedTags: t?.tags ?? [],
                     currentSessionId:

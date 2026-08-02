@@ -13,6 +13,7 @@ import {
   saveThread,
   parseThread,
   renameThreadFile,
+  resolveSourcePath,
   ChatThread,
   ChatMessage,
 } from "../chat/persistence";
@@ -142,6 +143,7 @@ export function ChatCardNode({ id, data }: NodeProps) {
     void app.vault.cachedRead(f).then((content) => {
       const t = parseThread(d.loadPath!, content);
       if (!t) return;
+      t.sourceNotePath = resolveSourcePath(app, t.sourceNotePath, d.loadPath!);
       threadRef.current = t;
       setMessages(t.messages);
       setSavedPath(t.filePath ?? d.loadPath!);

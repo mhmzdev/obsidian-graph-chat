@@ -99,6 +99,23 @@ export async function saveThread(
 }
 
 /**
+ * Source: lines store bare wikilinks ("[[Note]]"). Resolve to the note's real
+ * vault path so folder grouping and chat routing know where it lives.
+ */
+export function resolveSourcePath(
+  app: App,
+  sourceNotePath: string,
+  chatFilePath: string
+): string {
+  if (!sourceNotePath || sourceNotePath.includes("/")) return sourceNotePath;
+  const dest = app.metadataCache.getFirstLinkpathDest(
+    sourceNotePath.replace(/\.md$/, ""),
+    chatFilePath
+  );
+  return dest?.path ?? sourceNotePath;
+}
+
+/**
  * Rename a saved chat note to match its title: `chat - <title slug>.md`.
  * Uses fileManager.renameFile so backlinks stay intact. Returns the new path.
  */
