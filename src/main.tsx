@@ -33,6 +33,10 @@ export interface GraphChatSettings {
   chatRoutes: ChatRoute[];
   /** folders opted OUT of per-folder chats (their chats go to the root default) */
   perFolderChatsOff: string[];
+  /** false → notes never collapse into folder-overview cards, regardless of zoom */
+  folderCollapseEnabled: boolean;
+  /** zoom level (0.05–1) below which the canvas collapses to folder cards */
+  folderCollapseThreshold: number;
 }
 
 export const KNOWN_MODELS: ModelOption[] = [
@@ -56,6 +60,8 @@ const DEFAULT_SETTINGS: GraphChatSettings = {
   ],
   chatRoutes: [],
   perFolderChatsOff: [],
+  folderCollapseEnabled: true,
+  folderCollapseThreshold: 0.3,
 };
 
 /** Every folder that stores chat notes (default + routed). */
@@ -424,6 +430,43 @@ class GraphChatSettingTab extends PluginSettingTab {
           })
         );
       }
+    }
+
+    // ---- canvas: semantic zoom (folder collapse) ----
+    new Setting(containerEl)
+      .setName("Canvas")
+      .setDesc(
+        "Controls the semantic zoom that collapses notes into one card per top-level folder when zoomed far out."
+      )
+      .setHeading();
+
+    new Setting(containerEl)
+      .setName("Collapse to folders when zoomed out")
+      .setDesc("Turn off to always show individual notes, at any zoom level.")
+      .addToggle((tg) =>
+        tg.setValue(S.folderCollapseEnabled).onChange(async (v) => {
+          S.folderCollapseEnabled = v;
+          await save();
+          this.display();
+        })
+      );
+
+    if (S.folderCollapseEnabled) {
+      new Setting(containerEl)
+        .setName("Folder collapse threshold")
+        .setDesc(
+          "Zoom level below which the canvas collapses to folder cards. Lower means you have to zoom out further first."
+        )
+        .addSlider((s) =>
+          s
+            .setLimits(0.05, 1, 0.01)
+            .setValue(S.folderCollapseThreshold)
+            .setDynamicTooltip()
+            .onChange(async (v) => {
+              S.folderCollapseThreshold = v;
+              await save();
+            })
+        );
     }
   }
 }

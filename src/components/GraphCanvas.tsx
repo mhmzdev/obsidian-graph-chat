@@ -39,8 +39,6 @@ const nodeTypes = {
 };
 
 const CARD_WIDTH = 380;
-/** below this zoom the canvas collapses into folder overview cards */
-const OVERVIEW_ZOOM = 0.32;
 let chatCounter = 0;
 
 /** Insert a [[link]] into the note's Tags: line (create one if missing). */
@@ -113,8 +111,13 @@ function CanvasInner({
   const ctx = useMemo(() => ({ app, plugin }), [app, plugin]);
   const { screenToFlowPosition, setCenter } = useReactFlow();
   // semantic zoom: far out → folder overview (boolean selector = re-render
-  // only when crossing the threshold, not on every zoom frame)
-  const zoomedOut = useStore((s) => s.transform[2] < OVERVIEW_ZOOM);
+  // only when crossing the threshold, not on every zoom frame). Settings
+  // are read live here so a change applies without reopening the view.
+  const zoomedOut = useStore(
+    (s) =>
+      plugin.settings.folderCollapseEnabled &&
+      s.transform[2] < plugin.settings.folderCollapseThreshold
+  );
   // saved chats the user hid this session (✕) — live sync won't re-add them
   const closedChatsRef = useRef<Set<string>>(new Set());
 
