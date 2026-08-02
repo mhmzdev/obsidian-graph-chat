@@ -1,7 +1,11 @@
 import { cpSync, mkdirSync } from "fs";
 import { join } from "path";
 
+// Local dev helper: copies the built plugin into your vault.
+// Set OBSIDIAN_VAULT to your vault path, e.g.
+//   OBSIDIAN_VAULT="/path/to/My Vault" npm run deploy
 const VAULT =
+  process.env.OBSIDIAN_VAULT ??
   "/Users/hamza/Library/CloudStorage/GoogleDrive-hamza.6.shakeel@gmail.com/My Drive/Obsidian/My Vault";
 const DEST = join(VAULT, ".obsidian", "plugins", "graph-chat");
 

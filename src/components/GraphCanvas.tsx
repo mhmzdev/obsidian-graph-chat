@@ -938,51 +938,6 @@ function CanvasInner({
     [edges, highlight, selectedIds]
   );
 
-  // ---- focus lens, imperative: pure CSS class toggles, zero re-renders ----
-  const applyLens = useCallback(
-    (nodeId: string | null) => {
-      const root = wrapRef.current;
-      if (!root) return;
-      root.classList.toggle("gc-lens", nodeId !== null);
-      root
-        .querySelectorAll(".gc-lit, .gc-hoverflow")
-        .forEach((el) => el.classList.remove("gc-lit", "gc-hoverflow"));
-      if (nodeId === null) return;
-
-      const selected = nodesRef.current
-        .filter((n) => n.selected)
-        .map((n) => n.id);
-      const active = new Set<string>([nodeId, ...selected]);
-      const litNodes = new Set<string>(active);
-      const litEdges: { id: string; hovered: boolean }[] = [];
-      for (const e of edgesRef.current) {
-        if (active.has(e.source) || active.has(e.target)) {
-          litEdges.push({
-            id: e.id,
-            hovered: e.source === nodeId || e.target === nodeId,
-          });
-          litNodes.add(e.source);
-          litNodes.add(e.target);
-        }
-      }
-      for (const id of litNodes) {
-        root
-          .querySelector(`.react-flow__node[data-id="${CSS.escape(id)}"]`)
-          ?.classList.add("gc-lit");
-      }
-      for (const { id, hovered } of litEdges) {
-        const el = root.querySelector(
-          `.react-flow__edge[data-id="${CSS.escape(id)}"]`
-        );
-        if (el) {
-          el.classList.add("gc-lit");
-          if (hovered) el.classList.add("gc-hoverflow");
-        }
-      }
-    },
-    []
-  );
-
   // ---- smooth, cursor-anchored zoom (native-graph feel) ----
   const { getViewport, setViewport } = useReactFlow();
   const zoomAnimRef = useRef<{ target: number; raf: number | null }>({
@@ -1240,8 +1195,6 @@ function CanvasInner({
           onConnect={onConnect}
           onConnectEnd={onConnectEnd}
           onNodeDragStop={onNodeDragStop}
-          onNodeMouseEnter={(_e, n) => applyLens(n.id)}
-          onNodeMouseLeave={() => applyLens(null)}
           zoomOnScroll={false}
           onPaneClick={() => setHighlight(null)}
           connectOnClick={false}

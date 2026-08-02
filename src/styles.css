@@ -615,48 +615,6 @@ button.gc-model-btn:hover:not(:disabled) {
   color: var(--link-color, var(--interactive-accent));
 }
 
-/* ---------- focus lens (imperative, CSS-only — no React re-renders) ----------
-   Hovering a node adds .gc-lens to the wrapper and .gc-lit to the hovered +
-   selected neighborhoods. Everything else eases down; lit stays bright. */
-
-.react-flow__node {
-  transition: opacity 0.35s ease;
-}
-
-.react-flow__edge {
-  transition: opacity 0.35s ease;
-}
-
-.gc-lens .react-flow__node {
-  opacity: 0.14;
-}
-
-.gc-lens .react-flow__node.gc-lit {
-  opacity: 1;
-}
-
-.gc-lens .react-flow__edge {
-  opacity: 0.06;
-}
-
-.gc-lens .react-flow__edge.gc-lit {
-  opacity: 1;
-}
-
-/* edges touching the hovered node flow while hovered */
-.gc-lens .react-flow__edge.gc-hoverflow path {
-  stroke: var(--interactive-accent) !important;
-  stroke-width: 2 !important;
-  stroke-dasharray: 5;
-  animation: gc-dash 0.5s linear infinite;
-}
-
-@keyframes gc-dash {
-  to {
-    stroke-dashoffset: -10;
-  }
-}
-
 /* ---------- highlight states ---------- */
 
 /* clicked note → its chats + edges glow */

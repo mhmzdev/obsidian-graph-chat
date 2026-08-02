@@ -43,7 +43,7 @@ export const KNOWN_MODELS: ModelOption[] = [
 ];
 
 const DEFAULT_SETTINGS: GraphChatSettings = {
-  claudePath: "/Users/hamza/.local/bin/claude",
+  claudePath: "claude", // set an absolute path in settings if PATH lookup fails
   chatsFolder: "Chats",
   includeAll: false,
   includeFolders: ["0 - Everything", "Tags", "Chats"],
