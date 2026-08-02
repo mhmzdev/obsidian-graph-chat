@@ -1,7 +1,7 @@
 {
   "name": "obsidian-graph-chat",
-  "version": "1.0.0",
-  "description": "Extended graph view for Obsidian \u2014 vault graph where notes expand into Claude Code chat cards",
+  "version": "1.1.0",
+  "description": "Extended graph view for Obsidian — vault graph where notes expand into Claude Code chat cards",
   "main": "main.js",
   "scripts": {
     "dev": "node esbuild.config.mjs",
