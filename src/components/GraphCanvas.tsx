@@ -524,13 +524,15 @@ function CanvasInner({
           // saved (path-id) chats get the real edge from live sync; ephemeral
           // cards need a visual edge until then
           if (!card.id.includes("/")) {
+            const tagLeftOfCard = other.position.x <= card.position.x;
             setEdges((es) => [
               ...es,
               {
                 id: `taglink-${tagBase}->${card.id}`,
                 source: other.id,
+                sourceHandle: tagLeftOfCard ? undefined : "plus-left",
                 target: card.id,
-                targetHandle: "drop",
+                targetHandle: tagLeftOfCard ? undefined : "from-right",
                 className: "gc-edge-link",
                 data: { tagBase, cardId: card.id },
               },
@@ -598,14 +600,24 @@ function CanvasInner({
               : n
           )
         );
+        // anchor the link on facing sides — never through the card's middle,
+        // and stacking several links on one side keeps them on that side
+        const leftToRight = other.position.x <= card.position.x;
+        const linkSourceHandle = leftToRight
+          ? other.type === "chatCard"
+            ? "fork-right"
+            : undefined // notes/tags: unnamed right-side source handle
+          : other.type === "chatCard"
+          ? "fork-left"
+          : "plus-left";
         setEdges((es) => [
           ...es,
           {
             id: `link-${other.id}->${card.id}-${es.length}`,
-            source: other.id === src.id ? conn.source! : conn.target!,
-            sourceHandle: other.id === src.id ? conn.sourceHandle : undefined,
+            source: other.id,
+            sourceHandle: linkSourceHandle,
             target: card.id,
-            targetHandle: "drop",
+            targetHandle: leftToRight ? undefined : "from-right",
             className: "gc-edge-link",
             data: { notePath, cardId: card.id },
           },
@@ -1001,7 +1013,6 @@ function CanvasInner({
           target: `folder:${b}`,
           className: "gc-edge-folder",
           style: { strokeWidth: Math.min(8, 1 + count / 4) },
-          label: String(count),
         };
       })
     );
