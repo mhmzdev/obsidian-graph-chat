@@ -18,7 +18,7 @@ import {
   ChatMessage,
 } from "../chat/persistence";
 import type { BranchSide } from "./NoteNode";
-import { resolveChatsFolder } from "../main";
+import { resolveChatsFolder, isChatPath } from "../main";
 
 export interface ForkSnapshot {
   sourceNotePath: string;
@@ -294,9 +294,36 @@ export function ChatCardNode({ id, data }: NodeProps) {
 
     let prefix = "";
     if (isFirstEver && !thread.forkFromSessionId) {
-      prefix += thread.sourceNotePath
-        ? `You are chatting inside an Obsidian vault. This conversation is anchored to the note "${thread.sourceNotePath}". Read that note first, follow its wikilinks if helpful, then answer concisely.\n\n`
-        : `You are chatting inside an Obsidian vault. Answer concisely; read vault notes when the question calls for it.\n\n`;
+      if (thread.sourceNotePath) {
+        prefix += `You are chatting inside an Obsidian vault. This conversation is anchored to the note "${thread.sourceNotePath}". Read that note first.\n`;
+        // the note's full graph neighborhood — including BACKLINKS, which
+        // aren't discoverable from the note's own text
+        const links = app.metadataCache.resolvedLinks;
+        const outgoing = Object.keys(links[thread.sourceNotePath] ?? {});
+        const incoming = Object.entries(links)
+          .filter(
+            ([src, targets]) =>
+              src !== thread.sourceNotePath &&
+              thread.sourceNotePath in targets
+          )
+          .map(([src]) => src);
+        const neighbors = [...new Set([...outgoing, ...incoming])]
+          .filter(
+            (p) =>
+              !p.startsWith(plugin.settings.tagsFolder + "/") &&
+              !isChatPath(plugin.settings, p) &&
+              p !== thread.filePath
+          )
+          .slice(0, 60);
+        if (neighbors.length > 0) {
+          prefix += `Its graph neighborhood (linked notes AND notes linking back to it):\n${neighbors
+            .map((p) => `- ${p}`)
+            .join("\n")}\nRead whichever of these are relevant to the question before answering.\n`;
+        }
+        prefix += `Answer concisely.\n\n`;
+      } else {
+        prefix += `You are chatting inside an Obsidian vault. Answer concisely; read vault notes when the question calls for it.\n\n`;
+      }
     }
     const freshLinks = linkedNotes.filter(
       (p) => !consumedLinksRef.current.has(p)
