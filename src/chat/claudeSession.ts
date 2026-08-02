@@ -83,6 +83,7 @@ export function runPrompt(opts: RunPromptOptions): () => void {
   let stderrBuf = "";
   let lineBuf = "";
   let finished = false;
+  let spawnErrored = false;
 
   const handleEvent = (evt: StreamEvent) => {
     if (evt.type === "system" && evt.subtype === "init" && evt.session_id) {
@@ -128,13 +129,16 @@ export function runPrompt(opts: RunPromptOptions): () => void {
   });
 
   child.on("error", (err) => {
+    spawnErrored = true;
     opts.onError(
       `Could not start Claude CLI at "${opts.claudePath}": ${err.message}`
     );
   });
 
   child.on("close", (code) => {
-    if (!finished && code !== 0) {
+    // a failed spawn (e.g. bad claudePath) fires both "error" and "close" —
+    // the "error" handler already reported the specific reason above
+    if (!finished && !spawnErrored && code !== 0) {
       opts.onError(
         `Claude exited with code ${code}${stderrBuf ? ": " + stderrBuf.slice(0, 500) : ""}`
       );

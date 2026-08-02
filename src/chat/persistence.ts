@@ -50,17 +50,6 @@ export async function saveThread(
   const sourceBase = thread.sourceNotePath.replace(/\.md$/, "").split("/").pop() ?? "";
   const firstUser = thread.messages.find((m) => m.role === "user")?.text ?? "chat";
 
-  if (!thread.filePath) {
-    const base = sourceBase
-      ? `chat - ${slug(sourceBase)} - ${slug(firstUser) || "thread"}`
-      : `chat - ${slug(firstUser) || "thread"}`;
-    let candidate = normalizePath(`${chatsFolder}/${base}.md`);
-    for (let i = 2; app.vault.getAbstractFileByPath(candidate); i++) {
-      candidate = normalizePath(`${chatsFolder}/${base} ${i}.md`);
-    }
-    thread.filePath = candidate;
-  }
-
   const lines: string[] = [];
   if (thread.tags && thread.tags.length > 0) {
     lines.push(`Tags: ${thread.tags.map((t) => `[[${t}]]`).join(" ")}`);
@@ -94,16 +83,59 @@ export async function saveThread(
 
   const folder = normalizePath(chatsFolder);
   if (!app.vault.getAbstractFileByPath(folder)) {
-    await app.vault.createFolder(folder);
+    // another card racing to save into a brand-new folder may win first
+    await app.vault.createFolder(folder).catch(() => {});
   }
 
-  const existing = app.vault.getAbstractFileByPath(thread.filePath);
-  if (existing instanceof TFile) {
-    await app.vault.modify(existing, content);
-  } else {
-    await app.vault.create(thread.filePath, content);
+  // an already-persisted thread owns a stable path — just overwrite it.
+  // (Threads without one yet MUST NOT fall into modify() below: another
+  // card's fresh chat could coincidentally claim the same candidate name
+  // first, and modifying "existing" there would silently clobber it.)
+  if (thread.filePath) {
+    const existing = app.vault.getAbstractFileByPath(thread.filePath);
+    if (existing instanceof TFile) {
+      await app.vault.modify(existing, content);
+    } else {
+      // known path, but the file's gone (e.g. deleted outside the plugin) —
+      // recreate it there rather than hunting for a fresh name
+      await app.vault.create(thread.filePath, content);
+    }
+    return thread.filePath;
   }
+
+  const base = sourceBase
+    ? `chat - ${slug(sourceBase)} - ${slug(firstUser) || "thread"}`
+    : `chat - ${slug(firstUser) || "thread"}`;
+  thread.filePath = await createUnclaimed(app, chatsFolder, base, content);
   return thread.filePath;
+}
+
+/**
+ * Claim the first available "<base>[ N].md" name and create it there.
+ * Two threads can both see a name as free and race to create() it —
+ * losing that race isn't fatal, it just means someone else took the slot
+ * first, so retry the next candidate instead of surfacing an error.
+ */
+async function createUnclaimed(
+  app: App,
+  chatsFolder: string,
+  base: string,
+  content: string
+): Promise<string> {
+  const MAX_ATTEMPTS = 50;
+  let candidate = normalizePath(`${chatsFolder}/${base}.md`);
+  for (let i = 2; i <= MAX_ATTEMPTS + 1; i++) {
+    if (!app.vault.getAbstractFileByPath(candidate)) {
+      try {
+        await app.vault.create(candidate, content);
+        return candidate;
+      } catch {
+        // lost the race for this name — fall through and try the next one
+      }
+    }
+    candidate = normalizePath(`${chatsFolder}/${base} ${i}.md`);
+  }
+  throw new Error(`Could not find a free name for "${base}" after ${MAX_ATTEMPTS} attempts`);
 }
 
 /**
