@@ -1,5 +1,32 @@
 import { spawn } from "child_process";
 
+// Shapes read off `claude -p --output-format stream-json` — narrow to the
+// fields this file actually touches, not the CLI's full event schema.
+interface StreamContentBlock {
+  type: string;
+  text?: string;
+}
+
+interface StreamSystemEvent {
+  type: "system";
+  subtype?: string;
+  session_id?: string;
+}
+
+interface StreamAssistantEvent {
+  type: "assistant";
+  message?: { content?: StreamContentBlock[] };
+}
+
+interface StreamResultEvent {
+  type: "result";
+  session_id?: string;
+  is_error?: boolean;
+  result?: string;
+}
+
+type StreamEvent = StreamSystemEvent | StreamAssistantEvent | StreamResultEvent;
+
 export interface RunPromptOptions {
   claudePath: string;
   vaultPath: string; // cwd for the CLI — vault root, so CLAUDE.md/skills apply
@@ -57,11 +84,13 @@ export function runPrompt(opts: RunPromptOptions): () => void {
   let lineBuf = "";
   let finished = false;
 
-  const handleEvent = (evt: any) => {
+  const handleEvent = (evt: StreamEvent) => {
     if (evt.type === "system" && evt.subtype === "init" && evt.session_id) {
       sessionId = evt.session_id;
-    } else if (evt.type === "assistant" && evt.message?.content) {
-      for (const block of evt.message.content) {
+    } else if (evt.type === "assistant") {
+      const content = evt.message?.content;
+      if (!content) return;
+      for (const block of content) {
         if (block.type === "text" && block.text) {
           fullText += block.text;
           opts.onText(block.text);
@@ -87,7 +116,7 @@ export function runPrompt(opts: RunPromptOptions): () => void {
       lineBuf = lineBuf.slice(idx + 1);
       if (!line) continue;
       try {
-        handleEvent(JSON.parse(line));
+        handleEvent(JSON.parse(line) as StreamEvent);
       } catch {
         // non-JSON noise on stdout — ignore
       }
@@ -146,7 +175,7 @@ export function generateTitle(
     child.stdout.on("data", (c: Buffer) => (out += c.toString("utf8")));
     child.on("close", () => {
       try {
-        const j = JSON.parse(out);
+        const j = JSON.parse(out) as { result?: string };
         const t = String(j.result ?? "")
           .trim()
           .split("\n")[0]

@@ -87,7 +87,7 @@ function MarkdownMsg({ text }: { text: string }) {
         a.addEventListener("click", (e) => {
           e.preventDefault();
           const target = a.getAttribute("data-href") ?? a.getAttribute("href");
-          if (target) app.workspace.openLinkText(target, "", true);
+          if (target) void app.workspace.openLinkText(target, "", true);
         });
       });
     });
@@ -132,8 +132,8 @@ export function ChatCardNode({ id, data }: NodeProps) {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const consumedLinksRef = useRef<Set<string>>(new Set());
 
-  const linkedNotes = (d.linkedNotes ?? []) as string[];
-  const linkedTags = d.linkedTags as string[] | undefined;
+  const linkedNotes = d.linkedNotes ?? [];
+  const linkedTags = d.linkedTags;
 
   // Saved chat notes render directly as chat boxes: load thread from disk.
   useEffect(() => {
@@ -189,14 +189,14 @@ export function ChatCardNode({ id, data }: NodeProps) {
   useEffect(() => {
     if (!d.linkedNotes) return;
     const cur = threadRef.current.coSources ?? [];
-    const nxt = d.linkedNotes as string[];
+    const nxt = d.linkedNotes;
     if (cur.length === nxt.length && cur.every((v, i) => v === nxt[i])) return;
     threadRef.current.coSources = [...nxt];
     if (threadRef.current.filePath || threadRef.current.messages.length > 0) {
       void persist();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberately keyed on the joined string, not the linkedNotes array identity
-  }, [(d.linkedNotes as string[] | undefined)?.join("|")]);
+  }, [d.linkedNotes?.join("|")]);
 
   // linkedTags on node data is the source of truth (canvas adds/removes on
   // link drag / edge delete) — mirror it into the thread and persist.
@@ -253,8 +253,8 @@ export function ChatCardNode({ id, data }: NodeProps) {
       const path = await saveThread(app, chatsFolder, threadRef.current);
       setSavedPath(path);
       d.onSaved(id, path);
-    } catch (e: any) {
-      setError("Saving chat failed: " + e.message);
+    } catch (e) {
+      setError("Saving chat failed: " + (e instanceof Error ? e.message : String(e)));
     }
   };
 
@@ -355,13 +355,13 @@ export function ChatCardNode({ id, data }: NodeProps) {
         assistantMsg.text += chunk;
         setMessages([...thread.messages]);
       },
-      onDone: async (sessionId, fullText) => {
+      onDone: (sessionId, fullText) => {
         assistantMsg.text = fullText || assistantMsg.text;
         thread.sessionId = sessionId; // a branch gets its own id here
         d.onSessionUpdate(id, sessionId);
         setMessages([...thread.messages]);
         setBusy(false);
-        await persist();
+        void persist();
         // first exchange of an untitled chat → cheap Haiku call names it
         if (isFirstEver && !thread.title) {
           void generateTitle(
@@ -386,7 +386,7 @@ export function ChatCardNode({ id, data }: NodeProps) {
   const openChatNote = () => {
     if (!savedPath) return;
     const file = app.vault.getAbstractFileByPath(savedPath);
-    if (file) app.workspace.getLeaf("tab").openFile(file as any);
+    if (file instanceof TFile) void app.workspace.getLeaf("tab").openFile(file);
   };
 
   const forkHandle = (side: BranchSide) => (

@@ -5,6 +5,7 @@ import {
   forceCenter,
   forceCollide,
   SimulationNodeDatum,
+  SimulationLinkDatum,
 } from "d3-force";
 import type { VaultGraph } from "./buildGraph";
 
@@ -30,8 +31,8 @@ export function layoutGraph(graph: VaultGraph): Positions {
   const sim = forceSimulation(simNodes)
     .force(
       "link",
-      forceLink(simLinks)
-        .id((d: any) => d.id)
+      forceLink<SimNode, SimulationLinkDatum<SimNode>>(simLinks)
+        .id((d) => d.id)
         .distance(260)
         .strength(0.3)
     )

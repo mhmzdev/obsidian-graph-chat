@@ -54,6 +54,22 @@ re-attach it to the *original* parent — only orphan adoption at partner+1. A
 `Parent: [[chat]]` header line would fix it but deepens the OQ-1 format debt
 and dangles when the parent is renamed outside Obsidian's rename hooks.
 
+### OQ-9 — Migrate the settings tab to Obsidian's declarative `getSettingDefinitions()` API?
+**Owner:** human · **Blocks:** `main.tsx`'s settings tab; the plugin-review "Recommendation" it currently trips
+
+Obsidian 1.13.0 added `getSettingDefinitions()` as the preferred way to build
+a `PluginSettingTab`; the imperative `display()` we use is now `@deprecated`
+and the review flags it. But `getSettingDefinitions()` only renders on
+1.13.0+ — our `minAppVersion` is `1.7.2`, so `display()` cannot simply be
+deleted; the app itself never calls the new hook on older versions. Migrating
+means running two parallel implementations of the same UI (declarative for
+1.13.0+, imperative fallback below it), and the dynamic parts of our tab
+— the chat-routing rules list and the models checklist-plus-custom-entries —
+don't map to a simple key-bound control; they need `SettingDefinitionList`
+with custom `render`/`action` definitions per row, which is real UI design
+work with no test suite to catch regressions. Deferred 2026-08-02 rather than
+guessed at.
+
 ### OQ-8 — What is the provider-adapter contract for non-Claude CLIs?
 **Owner:** human · **Blocks:** the README's headline roadmap item (Codex, Gemini, GLM)
 

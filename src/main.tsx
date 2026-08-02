@@ -130,8 +130,8 @@ export default class GraphChatPlugin extends Plugin {
     );
 
     this.addCommand({
-      id: "open-graph-chat",
-      name: "Open Graph Chat view",
+      id: "open-view",
+      name: "Open view",
       callback: () => this.activateView(),
     });
 

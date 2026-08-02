@@ -1,5 +1,6 @@
 import { useRef } from "react";
 import { Handle, Position, NodeProps } from "@xyflow/react";
+import { TFile } from "obsidian";
 import { usePluginCtx } from "./PluginContext";
 import type { VaultNodeKind } from "../graph/buildGraph";
 
@@ -34,7 +35,7 @@ export function NoteNode({ id, data }: NodeProps) {
 
   const openNote = () => {
     const file = app.vault.getAbstractFileByPath(d.path);
-    if (file) app.workspace.getLeaf("tab").openFile(file as any);
+    if (file instanceof TFile) void app.workspace.getLeaf("tab").openFile(file);
   };
 
   const cancelPendingClick = () => {

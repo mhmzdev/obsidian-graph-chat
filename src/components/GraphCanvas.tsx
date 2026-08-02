@@ -75,6 +75,34 @@ interface Highlight {
   edges: Set<string>;
 }
 
+/**
+ * Superset of every node-type's data fields this file reads generically —
+ * NoteNodeData/TagNodeData/ChatCardData/FolderNodeData declare which are
+ * actually required for a given node type. One cast site instead of the
+ * `(n.data as any).field` scattered inline everywhere else.
+ */
+interface GraphNodeData {
+  path?: string;
+  kind?: VaultNodeKind;
+  filePath?: string;
+  anchorNodeId?: string;
+  level?: number | null;
+  sourceNotePath?: string;
+  initialThread?: ChatThread;
+  loadPath?: string;
+  metaLoaded?: boolean;
+  linkedTags?: string[];
+  linkedNotes?: string[];
+  currentSessionId?: string;
+  name?: string;
+  centroid?: { x: number; y: number };
+  [key: string]: unknown;
+}
+
+function nodeData(n: Node): GraphNodeData {
+  return n.data as GraphNodeData;
+}
+
 function CanvasInner({
   app,
   plugin,
@@ -103,11 +131,11 @@ function CanvasInner({
             sourceNotePath: g.id, // real source resolves after load
             loadPath: g.id,
             filePath: g.id,
-            onClose: (() => {}) as any, // bound later
-            onFork: (() => {}) as any,
-            onSessionUpdate: (() => {}) as any,
-            onSaved: (() => {}) as any,
-            onTagsLoaded: (() => {}) as any,
+            onClose: () => {}, // bound later
+            onFork: () => {},
+            onSessionUpdate: () => {},
+            onSaved: () => {},
+            onTagsLoaded: () => {},
           },
         };
       }
@@ -120,7 +148,7 @@ function CanvasInner({
           path: g.id,
           degree: g.degree,
           kind: g.kind,
-          onStartChat: (() => {}) as any,
+          onStartChat: () => {},
         },
       };
     },
@@ -182,7 +210,7 @@ function CanvasInner({
         const ephemeralPaths = new Set(
           current
             .filter((n) => n.type === "chatCard" && !n.id.includes("/"))
-            .map((n) => (n.data as any).filePath as string | undefined)
+            .map((n) => nodeData(n).filePath)
             .filter(Boolean)
         );
         const skipChat = (id: string) =>
@@ -269,7 +297,7 @@ function CanvasInner({
     if (nodeId.includes("/")) closedChatsRef.current.add(nodeId);
     setNodes((ns) => {
       const node = ns.find((n) => n.id === nodeId);
-      const savedAs = (node?.data as any)?.filePath as string | undefined;
+      const savedAs = node ? nodeData(node).filePath : undefined;
       if (savedAs) closedChatsRef.current.add(savedAs);
       return ns.filter((n) => n.id !== nodeId);
     });
@@ -329,10 +357,8 @@ function CanvasInner({
                 : anchor.position.x + CARD_WIDTH + 140,
             y: anchor.position.y + 60,
           };
-        const parentLevel =
-          typeof (anchor.data as any).level === "number"
-            ? ((anchor.data as any).level as number)
-            : 1;
+        const anchorLevel = nodeData(anchor).level;
+        const parentLevel = typeof anchorLevel === "number" ? anchorLevel : 1;
         const forkThread: ChatThread = {
           sourceNotePath: snapshot.sourceNotePath,
           sessionId: "",
@@ -352,10 +378,10 @@ function CanvasInner({
             level: parentLevel + 1,
             metaLoaded: true,
             onClose: closeChat,
-            onFork: (() => {}) as any, // bound below
-            onSessionUpdate: (() => {}) as any,
-            onSaved: (() => {}) as any,
-            onTagsLoaded: (() => {}) as any,
+            onFork: () => {}, // bound below
+            onSessionUpdate: () => {},
+            onSaved: () => {},
+            onTagsLoaded: () => {},
           },
         };
         // note nodes expose plus-* handles, chat cards expose fork-*
@@ -391,16 +417,15 @@ function CanvasInner({
         if (!anchor) return ns;
 
         const siblings = ns.filter(
-          (n) =>
-            n.type === "chatCard" && (n.data as any).anchorNodeId === anchorNodeId
+          (n) => n.type === "chatCard" && nodeData(n).anchorNodeId === anchorNodeId
         );
         const dup = ns.find(
           (n) =>
             n.type === "chatCard" &&
             !forceNew &&
-            (n.data as any).sourceNotePath === sourceNotePath &&
-            (n.data as any).initialThread === undefined &&
-            !(n.data as any).loadPath
+            nodeData(n).sourceNotePath === sourceNotePath &&
+            nodeData(n).initialThread === undefined &&
+            !nodeData(n).loadPath
         );
         if (dup) return ns;
 
@@ -425,10 +450,10 @@ function CanvasInner({
             level: 1,
             metaLoaded: true,
             onClose: closeChat,
-            onFork: (() => {}) as any, // bound below
-            onSessionUpdate: (() => {}) as any,
-            onSaved: (() => {}) as any,
-            onTagsLoaded: (() => {}) as any,
+            onFork: () => {}, // bound below
+            onSessionUpdate: () => {},
+            onSaved: () => {},
+            onTagsLoaded: () => {},
           },
         };
         setEdges((es) => [
@@ -476,9 +501,9 @@ function CanvasInner({
         const openCards = nodesRef.current.filter(
           (n) =>
             n.type === "chatCard" &&
-            ((n.data as any).anchorNodeId === nodeId ||
+            (nodeData(n).anchorNodeId === nodeId ||
               chatNotes.includes(n.id) ||
-              chatNotes.includes((n.data as any).filePath))
+              chatNotes.includes(nodeData(n).filePath ?? ""))
         );
         if (chatNotes.length > 0 || openCards.length > 0) {
           const hNodes = new Set<string>([
@@ -513,11 +538,11 @@ function CanvasInner({
       if (card) {
         // ---- tag dropped on a chat: real tag on the chat note (Tags: line) ----
         if (other.type === "tag") {
-          const tagBase = ((other.data as any).path as string)
+          const tagBase = (nodeData(other).path ?? "")
             .replace(/\.md$/, "")
             .split("/")
             .pop()!;
-          const cur = ((card.data as any).linkedTags as string[]) ?? [];
+          const cur = nodeData(card).linkedTags ?? [];
           if (cur.includes(tagBase)) return;
           setNodes((all) =>
             all.map((n) =>
@@ -550,8 +575,8 @@ function CanvasInner({
         // ---- chat→chat: target gains the other chat's transcript as context ----
         let notePath: string;
         if (other.type === "chatCard") {
-          const la = (src.data as any).level as number | null | undefined;
-          const lb = (tgt.data as any).level as number | null | undefined;
+          const la = nodeData(src).level;
+          const lb = nodeData(tgt).level;
           if (typeof la === "number" && typeof lb === "number" && la === lb) {
             new Notice(
               "Same-level chats can't be linked — link across levels instead."
@@ -577,7 +602,7 @@ function CanvasInner({
             );
           }
           const p =
-            ((other.data as any).filePath as string | undefined) ??
+            nodeData(other).filePath ??
             (other.id.includes("/") ? other.id : undefined);
           if (!p) {
             new Notice("That chat has no saved note yet — send a message first.");
@@ -585,9 +610,9 @@ function CanvasInner({
           }
           notePath = p;
         } else {
-          notePath = (other.data as any).path as string;
+          notePath = nodeData(other).path ?? "";
         }
-        const already = ((card.data as any).linkedNotes as string[]) ?? [];
+        const already = nodeData(card).linkedNotes ?? [];
         if (already.includes(notePath)) return;
         setNodes((all) =>
           all.map((n) =>
@@ -596,10 +621,7 @@ function CanvasInner({
                   ...n,
                   data: {
                     ...n.data,
-                    linkedNotes: [
-                      ...(((n.data as any).linkedNotes as string[]) ?? []),
-                      notePath,
-                    ],
+                    linkedNotes: [...(nodeData(n).linkedNotes ?? []), notePath],
                   },
                 }
               : n
@@ -631,8 +653,8 @@ function CanvasInner({
         return;
       }
 
-      const sKind = (src.data as any).kind as VaultNodeKind;
-      const tKind = (tgt.data as any).kind as VaultNodeKind;
+      const sKind = nodeData(src).kind;
+      const tKind = nodeData(tgt).kind;
       if (sKind === "tag" && tKind === "tag") return;
 
       let fileNode = src;
@@ -641,8 +663,8 @@ function CanvasInner({
         fileNode = tgt;
         linkNode = src;
       }
-      const filePath = (fileNode.data as any).path as string;
-      const linkBase = ((linkNode.data as any).path as string)
+      const filePath = nodeData(fileNode).path ?? "";
+      const linkBase = (nodeData(linkNode).path ?? "")
         .replace(/\.md$/, "")
         .split("/")
         .pop()!;
@@ -678,22 +700,19 @@ function CanvasInner({
         y: pos.y - 30,
       };
 
-      const data: any = fromNode.data ?? {};
+      const data = (fromNode.data ?? {}) as GraphNodeData;
       if (fromNode.type === "chatCard") {
-        const sessionId =
-          (data.currentSessionId as string) ??
-          (data.initialThread?.sessionId as string) ??
-          "";
+        const sessionId = data.currentSessionId ?? data.initialThread?.sessionId ?? "";
         forkChat(
           fromNode.id,
           side,
-          { sourceNotePath: data.sourceNotePath, sessionId },
+          { sourceNotePath: data.sourceNotePath ?? "", sessionId },
           cardPos
         );
         return;
       }
-      if ((data.kind as VaultNodeKind) === "tag") return;
-      spawnCard(fromNode.id, data.path, true, side, cardPos);
+      if (data.kind === "tag") return;
+      spawnCard(fromNode.id, data.path ?? "", true, side, cardPos);
     },
     [spawnCard, forkChat, screenToFlowPosition]
   );
@@ -719,19 +738,19 @@ function CanvasInner({
         // and the same link can be made again later
         if (e.className === "gc-edge-link") {
           const data = (e.data ?? {}) as { notePath?: string; tagBase?: string; cardId?: string };
-          const cardId = data.cardId ?? (chatNode?.id as string | undefined);
+          const cardId = data.cardId ?? chatNode?.id;
           if (!cardId) continue;
           setNodes((all) =>
             all.map((n) => {
               if (n.id !== cardId) return n;
-              const nd: any = { ...n.data };
+              const nd: GraphNodeData = { ...nodeData(n) };
               if (data.notePath) {
-                nd.linkedNotes = ((nd.linkedNotes as string[]) ?? []).filter(
+                nd.linkedNotes = (nd.linkedNotes ?? []).filter(
                   (p) => p !== data.notePath
                 );
               }
               if (data.tagBase) {
-                nd.linkedTags = ((nd.linkedTags as string[]) ?? []).filter(
+                nd.linkedTags = (nd.linkedTags ?? []).filter(
                   (t) => t !== data.tagBase
                 );
               }
@@ -744,7 +763,7 @@ function CanvasInner({
         // real tag↔chat edge: untag the chat note, never delete the chat
         if (chatNode && (src?.type === "tag" || tgt?.type === "tag")) {
           const tagNode = src?.type === "tag" ? src : tgt!;
-          const tagBase = ((tagNode.data as any).path as string)
+          const tagBase = (nodeData(tagNode).path ?? "")
             .replace(/\.md$/, "")
             .split("/")
             .pop()!;
@@ -755,9 +774,9 @@ function CanvasInner({
                     ...n,
                     data: {
                       ...n.data,
-                      linkedTags: (
-                        ((n.data as any).linkedTags as string[]) ?? []
-                      ).filter((t) => t !== tagBase),
+                      linkedTags: (nodeData(n).linkedTags ?? []).filter(
+                        (t) => t !== tagBase
+                      ),
                     },
                   }
                 : n
@@ -772,7 +791,7 @@ function CanvasInner({
           // lives on standalone with whatever context it already holds
           const other = chatNode.id === e.source ? tgt : src;
           if (e.className === "gc-edge" && other?.type === "note") {
-            const primary = (chatNode.data as any).sourceNotePath as string;
+            const primary = nodeData(chatNode).sourceNotePath ?? "";
             if (other.id !== primary) {
               // a co-source link — unlink just that note
               setNodes((all) =>
@@ -782,9 +801,9 @@ function CanvasInner({
                         ...n,
                         data: {
                           ...n.data,
-                          linkedNotes: (
-                            ((n.data as any).linkedNotes as string[]) ?? []
-                          ).filter((p) => p !== other.id),
+                          linkedNotes: (nodeData(n).linkedNotes ?? []).filter(
+                            (p) => p !== other.id
+                          ),
                         },
                       }
                     : n
@@ -821,7 +840,7 @@ function CanvasInner({
           if (
             e.className === "gc-edge-chat" &&
             !chatNode.id.includes("/") &&
-            !(chatNode.data as any).filePath
+            !nodeData(chatNode).filePath
           ) {
             setNodes((all) => all.filter((n) => n.id !== chatNode.id));
           }
@@ -863,9 +882,8 @@ function CanvasInner({
   const activeAnchors = useMemo(() => {
     const s = new Set<string>();
     for (const n of nodes) {
-      if (n.type === "chatCard" && (n.data as any).anchorNodeId) {
-        s.add((n.data as any).anchorNodeId as string);
-      }
+      const anchorId = nodeData(n).anchorNodeId;
+      if (n.type === "chatCard" && anchorId) s.add(anchorId);
     }
     return s;
   }, [nodes]);
@@ -976,9 +994,9 @@ function CanvasInner({
             x: px - (px - v.x) * k,
             y: py - (py - v.y) * k,
           });
-          anim.raf = requestAnimationFrame(step);
+          anim.raf = window.requestAnimationFrame(step);
         };
-        anim.raf = requestAnimationFrame(step);
+        anim.raf = window.requestAnimationFrame(step);
       }
     };
     el.addEventListener("wheel", onWheel, { passive: false, capture: true });
@@ -1010,7 +1028,7 @@ function CanvasInner({
     (n: Node): string => {
       if (n.type === "chatCard") {
         // chats belong to the folder of the note they came from
-        const srcp = (n.data as any).sourceNotePath as string | undefined;
+        const srcp = nodeData(n).sourceNotePath;
         if (srcp && srcp.includes("/")) return srcp.split("/")[0];
         return plugin.settings.chatsFolder.split("/")[0];
       }
@@ -1107,14 +1125,11 @@ function CanvasInner({
   // card itself is culled off-screen (grouping and link rules depend on it)
   useEffect(() => {
     const pending = nodes.filter(
-      (n) =>
-        n.type === "chatCard" &&
-        (n.data as any).loadPath &&
-        !(n.data as any).metaLoaded
+      (n) => n.type === "chatCard" && nodeData(n).loadPath && !nodeData(n).metaLoaded
     );
     if (pending.length === 0) return;
     for (const n of pending) {
-      const lp = (n.data as any).loadPath as string;
+      const lp = nodeData(n).loadPath ?? "";
       const f = app.vault.getAbstractFileByPath(lp);
       if (!(f instanceof TFile)) continue;
       void app.vault.cachedRead(f).then((content) => {
@@ -1135,8 +1150,7 @@ function CanvasInner({
                     linkedNotes: (t?.coSources ?? []).map((b) =>
                       resolveSourcePath(app, b, lp)
                     ),
-                    currentSessionId:
-                      t?.sessionId || (x.data as any).currentSessionId,
+                    currentSessionId: t?.sessionId || nodeData(x).currentSessionId,
                   },
                 }
               : x
@@ -1150,8 +1164,8 @@ function CanvasInner({
   const onNodeDragStop = useCallback(
     (_e: unknown, node: Node) => {
       if (node.type === "folder") {
-        const name = (node.data as any).name as string;
-        const centroid = (node.data as any).centroid as { x: number; y: number };
+        const name = nodeData(node).name ?? "";
+        const centroid = nodeData(node).centroid ?? { x: 0, y: 0 };
         const dx = node.position.x - centroid.x;
         const dy = node.position.y - centroid.y;
         if (dx !== 0 || dy !== 0) {
