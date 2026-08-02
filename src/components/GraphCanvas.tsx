@@ -148,6 +148,7 @@ function CanvasInner({
   const [nodes, setNodes] = useState<Node[]>(initial.nodes);
   const [edges, setEdges] = useState<Edge[]>(initial.edges);
   const [highlight, setHighlight] = useState<Highlight | null>(null);
+  const [hoverId, setHoverId] = useState<string | null>(null);
   const nodesRef = useRef(nodes);
   useEffect(() => {
     nodesRef.current = nodes;
@@ -920,7 +921,11 @@ function CanvasInner({
     () =>
       edges.map((e) => {
         const glow = highlight?.edges.has(e.id) ?? false;
-        const flow = selectedIds.has(e.source) || selectedIds.has(e.target);
+        // tap = pinned flow (selection), hover = momentary flow
+        const flow =
+          selectedIds.has(e.source) ||
+          selectedIds.has(e.target) ||
+          (hoverId !== null && (e.source === hoverId || e.target === hoverId));
         // narrow hit zone: edges stay clickable but stop eating pan gestures
         if (!glow && !flow) return { ...e, interactionWidth: 6 };
         return {
@@ -932,7 +937,7 @@ function CanvasInner({
             .join(" "),
         };
       }),
-    [edges, highlight, selectedIds]
+    [edges, highlight, selectedIds, hoverId]
   );
 
   const onNodesChange = useCallback(
@@ -1141,6 +1146,8 @@ function CanvasInner({
           onConnect={onConnect}
           onConnectEnd={onConnectEnd}
           onNodeDragStop={onNodeDragStop}
+          onNodeMouseEnter={(_e, n) => setHoverId(n.id)}
+          onNodeMouseLeave={() => setHoverId(null)}
           onPaneClick={() => setHighlight(null)}
           connectOnClick={false}
           deleteKeyCode={["Backspace", "Delete"]}
