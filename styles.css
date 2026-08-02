@@ -1295,8 +1295,8 @@ button.gc-model-btn:hover:not(:disabled) {
 }
 
 .gc-edge-link path {
-  stroke: color-mix(in srgb, var(--interactive-accent) 55%, transparent);
-  stroke-dasharray: 2 4;
+  stroke: color-mix(in srgb, var(--interactive-accent) 65%, transparent);
+  stroke-width: 1.5;
 }
 
 /* selected edge (click it, then press Delete/Backspace to remove the link) */

@@ -144,6 +144,11 @@ export function ChatCardNode({ id, data }: NodeProps) {
       const t = parseThread(d.loadPath!, content);
       if (!t) return;
       t.sourceNotePath = resolveSourcePath(app, t.sourceNotePath, d.loadPath!);
+      t.coSources = (t.coSources ?? []).map((b) =>
+        resolveSourcePath(app, b, d.loadPath!)
+      );
+      // the session already knows these notes — don't re-inject on next send
+      t.coSources.forEach((p) => consumedLinksRef.current.add(p));
       threadRef.current = t;
       setMessages(t.messages);
       setSavedPath(t.filePath ?? d.loadPath!);
@@ -178,6 +183,20 @@ export function ChatCardNode({ id, data }: NodeProps) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [d.sourceDetached]);
+
+  // linked notes are CO-SOURCES: persisted on the chat note's Source line so
+  // the shared context survives reloads and shows as a real graph edge
+  useEffect(() => {
+    if (!d.linkedNotes) return;
+    const cur = threadRef.current.coSources ?? [];
+    const nxt = d.linkedNotes as string[];
+    if (cur.length === nxt.length && cur.every((v, i) => v === nxt[i])) return;
+    threadRef.current.coSources = [...nxt];
+    if (threadRef.current.filePath || threadRef.current.messages.length > 0) {
+      void persist();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [(d.linkedNotes as string[] | undefined)?.join("|")]);
 
   // linkedTags on node data is the source of truth (canvas adds/removes on
   // link drag / edge delete) — mirror it into the thread and persist.
@@ -465,21 +484,6 @@ export function ChatCardNode({ id, data }: NodeProps) {
         ))}
         {error && <div className="gc-msg gc-msg-error">{error}</div>}
       </div>
-      {(linkedNotes.length > 0 || (linkedTags?.length ?? 0) > 0) && (
-        <div className="gc-chips">
-          {linkedTags?.map((t) => (
-            <span key={"tag-" + t} className="gc-chip gc-chip-tag" title={`Tags/${t}`}>
-              #{t}
-            </span>
-          ))}
-          {linkedNotes.map((p) => (
-            <span key={p} className="gc-chip" title={p}>
-              <Icon name="paperclip" size={9} />
-              {p.replace(/\.md$/, "").split("/").pop()}
-            </span>
-          ))}
-        </div>
-      )}
       <div className="gc-chat-input-row">
         <textarea
           ref={inputRef}

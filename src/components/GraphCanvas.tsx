@@ -238,9 +238,6 @@ function CanvasInner({
           return result;
         });
         setEdges((es) => {
-          const extraEdges = es.filter(
-            (e) => e.className === "gc-edge-chat" || e.className === "gc-edge-link"
-          );
           const graphEdges: Edge[] = graph.edges
             .filter((e) => finalIds.has(e.source) && finalIds.has(e.target))
             .map((e) => ({
@@ -249,6 +246,13 @@ function CanvasInner({
               target: e.target,
               className: "gc-edge",
             }));
+          const graphPairs = new Set(graphEdges.map((e) => e.id));
+          const extraEdges = es.filter(
+            (e) =>
+              (e.className === "gc-edge-chat" ||
+                e.className === "gc-edge-link") &&
+              !graphPairs.has(pairKey(e.source, e.target))
+          );
           return [...graphEdges, ...extraEdges];
         });
       }, 600);
@@ -767,14 +771,40 @@ function CanvasInner({
           // lives on standalone with whatever context it already holds
           const other = chatNode.id === e.source ? tgt : src;
           if (e.className === "gc-edge" && other?.type === "note") {
-            setNodes((all) =>
-              all.map((n) =>
-                n.id === chatNode.id
-                  ? { ...n, data: { ...n.data, sourceDetached: true, level: null } }
-                  : n
-              )
-            );
-            new Notice("Chat detached — it now stands alone.");
+            const primary = (chatNode.data as any).sourceNotePath as string;
+            if (other.id !== primary) {
+              // a co-source link — unlink just that note
+              setNodes((all) =>
+                all.map((n) =>
+                  n.id === chatNode.id
+                    ? {
+                        ...n,
+                        data: {
+                          ...n.data,
+                          linkedNotes: (
+                            ((n.data as any).linkedNotes as string[]) ?? []
+                          ).filter((p) => p !== other.id),
+                        },
+                      }
+                    : n
+                )
+              );
+              new Notice(
+                `Unlinked ${other.id.split("/").pop()} from the chat`
+              );
+            } else {
+              setNodes((all) =>
+                all.map((n) =>
+                  n.id === chatNode.id
+                    ? {
+                        ...n,
+                        data: { ...n.data, sourceDetached: true, level: null },
+                      }
+                    : n
+                )
+              );
+              new Notice("Chat detached — it now stands alone.");
+            }
           }
           // cutting a branch edge orphans the child chat — level cleared
           if (e.className === "gc-edge-chat" && tgt?.type === "chatCard") {
@@ -1048,6 +1078,9 @@ function CanvasInner({
                       : "",
                     level: t?.level ?? null,
                     linkedTags: t?.tags ?? [],
+                    linkedNotes: (t?.coSources ?? []).map((b) =>
+                      resolveSourcePath(app, b, lp)
+                    ),
                     currentSessionId:
                       t?.sessionId || (x.data as any).currentSessionId,
                   },

@@ -18,6 +18,8 @@ export interface ChatThread {
   tags?: string[];
   /** branch depth (1 = chat from a note). Undefined = orphan, attachable anywhere. */
   level?: number;
+  /** additional notes sharing context with this chat (co-sources) */
+  coSources?: string[];
 }
 
 function slug(s: string): string {
@@ -64,7 +66,13 @@ export async function saveThread(
     lines.push(`Tags: ${thread.tags.map((t) => `[[${t}]]`).join(" ")}`);
   }
   if (sourceBase) {
-    lines.push(`Source: [[${sourceBase}]]`);
+    const links = [
+      `[[${sourceBase}]]`,
+      ...(thread.coSources ?? []).map(
+        (p) => `[[${p.replace(/\.md$/, "").split("/").pop()}]]`
+      ),
+    ];
+    lines.push(`Source: ${[...new Set(links)].join(" ")}`);
   }
   lines.push(`Session: ${thread.sessionId || "pending"}`);
   if (typeof thread.level === "number") {
@@ -148,7 +156,10 @@ export function parseThread(
   filePath: string,
   content: string
 ): ChatThread | null {
-  const sourceMatch = content.match(/^Source: \[\[(.+?)\]\]/m);
+  const sourceLine = content.match(/^Source: (.+)$/m)?.[1] ?? "";
+  const sourceLinks = [...sourceLine.matchAll(/\[\[([^\]|]+)(\|[^\]]*)?\]\]/g)].map(
+    (m) => m[1]
+  );
   const sessionMatch = content.match(/^Session: (\S+)/m);
 
   const messages: ChatMessage[] = [];
@@ -162,7 +173,7 @@ export function parseThread(
     });
   }
 
-  if (!sourceMatch && messages.length === 0) return null;
+  if (sourceLinks.length === 0 && messages.length === 0) return null;
   const sessionId = sessionMatch?.[1];
   const headingMatch = content.match(/^# (.+)$/m);
   const heading = headingMatch?.[1]?.trim();
@@ -172,12 +183,16 @@ export function parseThread(
   );
   const levelMatch = content.match(/^Level: (\d+)$/m);
   return {
-    sourceNotePath: sourceMatch ? sourceMatch[1] + ".md" : "",
+    sourceNotePath: sourceLinks.length > 0 ? sourceLinks[0] + ".md" : "",
     sessionId: sessionId && sessionId !== "pending" ? sessionId : "",
     messages,
     filePath,
     title: heading && !heading.startsWith("Chat — ") ? heading : undefined,
     tags: tags.length > 0 ? tags : undefined,
     level: levelMatch ? parseInt(levelMatch[1], 10) : undefined,
+    coSources:
+      sourceLinks.length > 1
+        ? sourceLinks.slice(1).map((b) => b + ".md")
+        : undefined,
   };
 }
