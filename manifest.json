@@ -1,7 +1,7 @@
 {
 	"id": "graph-chat",
 	"name": "Graph Chat",
-	"version": "1.1.0",
+	"version": "1.1.1",
 	"minAppVersion": "1.7.2",
 	"description": "An extended graph view where notes open into AI chat boxes powered by your local Claude Code CLI. Branch conversations, link notes by dragging, and every chat is a real markdown note.",
 	"author": "Muhammad Hamza",
