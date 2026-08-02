@@ -7,7 +7,10 @@
     "dev": "node esbuild.config.mjs",
     "build": "node esbuild.config.mjs production",
     "deploy": "npm run build && node deploy.mjs",
-    "version": "node version-bump.mjs && git add manifest.json versions.json"
+    "version": "node version-bump.mjs && git add manifest.json versions.json",
+    "publish:patch": "npm version patch && git push && git push --tags",
+    "publish:minor": "npm version minor && git push && git push --tags",
+    "publish:major": "npm version major && git push && git push --tags"
   },
   "keywords": [
     "obsidian",

@@ -77,6 +77,22 @@ Your notes never leave your machine except through your own Claude CLI, under yo
 - Promote a co-source note to primary
 - Mobile-friendly fallback view
 
+## Development
+
+```bash
+npm install
+npm run dev              # watch build
+OBSIDIAN_VAULT="/path/to/vault" npm run deploy   # build + copy into your vault
+
+# releasing (bumps package.json + manifest.json + versions.json, tags,
+# pushes — the GitHub Action then builds and drafts the release):
+npm run publish:patch    # 1.0.0 -> 1.0.1
+npm run publish:minor    # 1.0.0 -> 1.1.0
+npm run publish:major    # 1.0.0 -> 2.0.0
+```
+
+For an exact version: `npm version 1.2.3 && git push && git push --tags`.
+
 ## License
 
 [MIT](LICENSE)
