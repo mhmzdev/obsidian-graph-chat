@@ -15,71 +15,72 @@ an ADR and strike the question with a pointer to it.
 ### OQ-1 — How should the chat-note format survive round-tripping?
 **Owner:** human · **Blocks:** any change to `persistence.ts`; per-message metadata
 
-`parseThread` splits on `^## (Me|Claude)$` (`persistence.ts:96`). A reply
-containing such a heading re-parses into the wrong messages — reachable simply
-by asking Claude about this format. There is also no format version marker, so
-any future change breaks every existing chat note with no migration path.
-
-Options, roughly in increasing cost:
-1. Escape or fence message bodies on write.
-2. Use HTML comment delimiters (`<!-- gc:user -->`) — invisible in reading
-   view, unambiguous to parse, but ugly in source.
-3. Accept lossiness and treat the note as a human-readable *record* whose
-   authoritative form is the CLI session.
-
-Option 3 is closest to how the system already behaves (see
-[ADR 0003](decisions/0003-sessions-and-forks.md) — the session already wins on
-disagreement), but it is worth choosing deliberately rather than by default.
-Whatever is chosen, add a version marker first.
+`parseThread` splits on `^## (Me|Claude)$`. A reply containing such a heading
+re-parses into the wrong messages — reachable simply by asking Claude about
+this format. There is still no format version marker, and the header has
+since grown `Level:` and multi-link `Source:` lines, so the migration debt
+compounds with every field. Options unchanged (escape on write / HTML-comment
+delimiters / accept lossiness because the CLI session is authoritative per
+[ADR 0003](decisions/0003-sessions-and-forks.md)) — but choose deliberately,
+and add a version marker first.
 
 ### OQ-2 — Does the tool want per-message model attribution?
-**Owner:** human · **Blocks:** [ADR 0006](decisions/0006-plaintext-chat-note-header.md) successor; the multi-model comparison feature
+**Owner:** human · **Blocks:** [ADR 0006](decisions/0006-plaintext-chat-note-header.md) successor
 
-Models are chosen per turn ([ADR 0009](decisions/0009-per-card-model-selection.md))
-but nothing is recorded. For a tool whose premise is comparing models, a
-transcript that cannot say who said what is a real gap — but fixing it means
-changing the note format, so it is coupled to OQ-1.
+Sharper now than when filed: branch-per-model comparison is the headline
+feature ([ADR 0012](decisions/0012-persisted-branch-levels.md) exists to serve
+it), yet a transcript cannot say which model said what. Coupled to OQ-1.
 
 ### OQ-3 — What should happen when a session id cannot be resumed?
-**Owner:** human · **Blocks:** cross-device use; error handling in `ChatCardNode`
+**Owner:** human · **Blocks:** cross-device use
 
-Chat notes sync between machines; CLI sessions do not. Sessions can also be
-expired or cleared locally. Today the failure surfaces as a raw stderr string
-in the card (`ChatCardNode.tsx:199-203`).
-
-Plausible answers: detect the failure and offer to replay the transcript into a
-fresh session; mark the thread read-only with a clear explanation; or silently
-start fresh and warn. The first is the only one that preserves the product
-promise, and it depends on OQ-1 — replay needs a reliable parse.
+Chat notes sync between machines; CLI sessions do not. Failure is still a raw
+error string in the card. Replay-into-fresh-session remains the only answer
+that preserves the product promise, and it depends on OQ-1.
 
 ### OQ-4 — Should conversations be able to reach the web?
 **Owner:** human · **Blocks:** [ADR 0005](decisions/0005-read-only-tool-policy.md) scope
 
-`WebFetch` and `WebSearch` are in `--disallowedTools` alongside the write
-tools. Read-only is clearly deliberate; whether *offline* is deliberate or
-incidental is not clear from the code. Enabling them is a one-line change but
-widens the prompt-injection surface — a vault note could then direct the model
-to fetch a URL.
+`WebFetch`/`WebSearch` remain disallowed through v1.0.0. Whether *offline* is
+deliberate or incidental is still unconfirmed by the author.
 
-### OQ-5 — What is the intended audience?
-**Owner:** human · **Blocks:** settings UI, release path, defaults
+### OQ-7 — Should branch parentage persist, not just depth?
+**Owner:** human · **Blocks:** re-attach/undo for detached branches; branch-tree views
 
-Defaults are hardcoded to the author's vault and CLI path (`main.tsx:12-17`),
-and `deploy.mjs` targets one absolute directory. If this stays a personal tool,
-much of `state.md`'s "next" list is unnecessary. If it is meant to be shared,
-the settings tab is the first blocker and should come before further UX rounds.
+`Level: N` records how deep a chat is, not whose child it is
+([ADR 0012](decisions/0012-persisted-branch-levels.md)). After a reload, a
+branch knows its depth but not its parent; after a detach, nothing can
+re-attach it to the *original* parent — only orphan adoption at partner+1. A
+`Parent: [[chat]]` header line would fix it but deepens the OQ-1 format debt
+and dangles when the parent is renamed outside Obsidian's rename hooks.
 
-### OQ-6 — Should canvas layout persist?
-**Owner:** human · **Blocks:** layout work; [ADR 0004](decisions/0004-react-flow-canvas.md) follow-up
+### OQ-8 — What is the provider-adapter contract for non-Claude CLIs?
+**Owner:** human · **Blocks:** the README's headline roadmap item (Codex, Gemini, GLM)
 
-Positions are recomputed by force layout on every mount and open cards are
-lost on view close. Arranging a workspace is currently throwaway effort. If it
-should persist, the open question underneath is *what* persists — positions
-only, or open cards too, and keyed by what when notes are renamed.
+`runPrompt()` is the seam, but the contract it assumes is Claude-shaped:
+stream-json events, `--resume`/`--fork-session` semantics, read-only tool
+flags, and a cheap secondary model for titles. Which of these are *required*
+capabilities (a CLI without session forking cannot do branches) versus
+degradable ones decides whether the adapter interface is honest or a leaky
+lowest common denominator.
 
 ---
 
 ## Answered
 
-*(none yet — when a question is answered, move it here with the answer, the
-date, and a link to the ADR or commit that settled it)*
+### ~~OQ-5 — What is the intended audience?~~
+**Answered 2026-08-02: public release.** The author shipped v1.0.0 with a
+settings tab (commit `652f5e0`), de-personalized defaults (`claudePath:
+"claude"`, `OBSIDIAN_VAULT` env for deploy), README/LICENSE, and a tagged
+GitHub release pipeline (`e876b2e`). Community-store submission is on the
+state.md list. The "personal tool" fork of this question is dead.
+
+### ~~OQ-6 — Should canvas layout persist?~~
+**Answered 2026-07-26: yes — positions, keyed by vault path.** Node positions
+save to plugin data on drag-stop and restore on mount (commit `ffeaac3`);
+folder-card cluster drags persist the same way. The "open cards too?" half
+became moot when saved chats started rendering as always-open boxes
+([ADR 0010](decisions/0010-chats-render-as-chat-boxes.md)) — the only
+non-persistent thing left is an ephemeral card that never sent a message.
+Rename-key drift remains a real hole: positions are keyed by path, so a
+renamed note re-enters layout fresh.

@@ -1,87 +1,68 @@
 # Project state
 
 **Synthesis layer.** What you can rely on today, what is deliberately rough,
-and what comes next. Verified against commit `7bfa126`, 2026-07-25.
+and what comes next. Verified against commit `856681d`, 2026-08-02.
 
-**Maturity: working prototype.** Six rounds of UX iteration in one day, all on
-`main`, no tests, no releases. It runs in the author's vault and nowhere else
-yet.
+**Maturity: released.** v1.0.0 is tagged; the GitHub Action has drafted the
+release (publish pending the author adding a changelog). Fourteen UX rounds
+across 2026-07-25 → 2026-08-02, all with the author as the only user so far.
+Still no tests.
 
 ## Works
 
 | Capability | Notes |
 | --- | --- |
-| Vault graph on a React Flow canvas | Folder-scoped, force-laid-out once at mount |
-| Click a note → chat with Claude about it | Vault-aware; the model reads the note and its links |
-| Streaming replies rendered as real Obsidian markdown | Wikilinks inside replies are clickable and open the note |
-| Chats persist as vault notes after every turn | Survives crashes; the chat note is written before the reply arrives |
-| Reopen a saved chat and continue it | Session resumed from the id in the note header |
-| Fork a conversation into a fresh window | Parent untouched; child gets its own session on first turn |
-| Multiple chats per note, left and right | Plus the highlight gesture to find existing ones |
-| Per-card model picker, switchable mid-thread | Sonnet / Fable 5 / Opus / Haiku |
-| Drag `+` between nodes → write a real `[[wikilink]]` | Lands on the note's `Tags:` line |
-| Delete an edge → remove the wikilink | Checks both sides |
-| Drag a note onto a card → attach it as context | Injected once, shown as a chip |
-| Drop a `+` on empty canvas → card lands there | Works for both new chats and forks |
-| Live re-sync when the vault changes | Debounced 600 ms; open cards preserved |
-
-## Deliberately not built yet
-
-- **No settings UI.** `GraphChatSettings` exists and is loaded/saved, but
-  `main.tsx` never calls `addSettingTab`, so the only way to change
-  `claudePath`, `chatsFolder`, `includeFolders`, or `tagsFolder` is to edit
-  `data.json` by hand. The defaults are hardcoded to the author's vault
-  (`src/main.tsx:12-17`).
-- **No canvas persistence.** Positions come from a fresh force layout on every
-  mount, and open cards vanish when the view closes. Closing the tab loses your
-  workspace arrangement — though never a conversation.
-- **No tests, no linter, no CI.** `package.json` has `dev`, `build`, `deploy`
-  and nothing else.
-- **No release path.** `deploy.mjs` hardcodes one absolute vault path
-  (`deploy.mjs:4-6`); there is no BRAT manifest, no `versions.json`, no
-  GitHub release workflow.
-- **No mobile support.** `isDesktopOnly: true` — the plugin spawns a child
-  process, which rules mobile out structurally.
+| Vault graph on a React Flow canvas | Include-all or folder checklist; positions persist across sessions |
+| Chat from any note via `+` | First message carries the note + its full graph neighborhood (links **and backlinks**) |
+| Saved chats render as open chat boxes | Always; auto-size to ~10 messages then scroll; rehydrate after culling/overview swaps |
+| Branching with shared memory | `--fork-session`; fresh window; levels persisted (`Level: N`); CHAT/BRANCH chips |
+| Standalone (orphan) chats | Detach = unlink, never delete; orphans link anywhere, adopted at parent+1 |
+| Canvas-as-editor | Drag `+` → wikilink (Tags: line) / tag a chat / co-source into a chat; edge delete reverses each |
+| Co-sources | Persisted on the `Source:` line; shared-context chats across several notes |
+| AI titles | Haiku one-shot after first exchange; file renames; manual rename wins |
+| Per-folder chat storage | `<folder>/Chats` default with opt-outs; explicit routing rules; multiple chat folders everywhere |
+| Settings tab | CLI path, models (toggles + custom + default), folders (all/checklist), routing table, per-folder toggles |
+| Per-card model picker | From settings; switchable mid-thread |
+| Semantic zoom | Folder cards < 0.32 zoom, grouped by source folder; cluster drag; count-weighted edges |
+| Performance | Viewport culling; smooth cursor-anchored zoom; tap-to-flow only (hover deliberately inert) |
+| Release pipeline | `npm run publish:*` → tag → Action → draft release; README + LICENSE + showcase shipped |
 
 ## Known rough edges
 
-Ranked by how likely they are to bite. None is currently blocking use.
-
-1. **Chat notes are a lossy round-trip.** `parseThread` splits on `^## (Me|Claude)$`
-   (`persistence.ts:96`), so a reply that itself contains such a heading — easy,
-   when asking Claude about this very format — will be re-parsed into the wrong
-   number of messages. Editing a chat note by hand is likewise unguarded.
-2. **Sessions are machine-local.** A chat note synced to another device carries
-   a session id the local CLI has never heard of. Resume will fail there.
-   Failure mode is currently an unstyled error string in the card.
-3. **Positions of newly-appeared vault nodes are guesswork.** The live-sync path
-   places them at a fixed offset from a linked neighbour with a `% 4` spread
-   (`GraphCanvas.tsx:143-149`), so a burst of new notes stacks up.
-4. **`chatCounter` is a module-level global** (`GraphCanvas.tsx:34`). Fine with
-   one view open; two views in the same window would share the counter.
-5. **StrictMode double-invokes effects** (`view.tsx:35`). Harmless today because
-   nothing spawns a process on mount, but the first effect that does will
-   double-fire in dev.
-6. **No error boundary.** A render throw in one card takes the whole canvas
-   down to a blank pane.
-7. **`onFork`'s declared type takes three arguments** (`ChatCardNode.tsx:29`)
-   while the implementation accepts an optional fourth (`posOverride`). The
-   drag-to-empty path passes it and works; the type just under-describes it.
+1. **Chat notes are a lossy round-trip** — unchanged since Round 6. A reply
+   containing `## Me` / `## Claude` mis-parses; no format version marker
+   ([OQ-1](open-questions.md)). The header has since gained `Level:` and
+   multi-link `Source:` — the migration debt grows with each field.
+2. **Sessions are machine-local** ([OQ-3](open-questions.md)). Resume on
+   another device fails as a red error string in the card.
+3. **Branch lineage is only depth, not parentage.** `Level: N` survives
+   reloads but *who* the parent was does not — an orphaned level-2 chat can't
+   be re-attached to its original parent specifically ([OQ-7](open-questions.md)).
+4. **Unsent input dies with an unmount.** A card that never sent a message has
+   no file; culling or overview swap loses typed-but-unsent text.
+5. **`chatCounter` is module-global**; two Graph Chat views in one window
+   would share it. Unchanged.
+6. **No error boundary**; a render throw in one card blanks the canvas.
+   Unchanged.
+7. **First-run UX depends on PATH.** Default `claudePath` is `"claude"`;
+   Obsidian's GUI environment often lacks the user's shell PATH, so the first
+   experience for a new user may be a spawn error until they set the absolute
+   path in settings. Surfaced in the card, documented in the README, still a
+   stumble.
+8. **Model attribution is not recorded** per message ([OQ-2](open-questions.md))
+   — unchanged, and more visible now that model-comparison via branches is the
+   headline feature.
 
 ## What's next
 
-No committed roadmap — the project moves in UX rounds. The candidates that keep
-surfacing, in rough order of value:
-
-1. **Settings tab**, so the plugin can run in a vault other than the author's.
-   Also the prerequisite for anyone else trying it.
-2. **Persist canvas layout** (positions + open cards) to plugin data, keyed by
-   vault node path.
-3. **Harden the chat-note format** against round-trip loss — see
-   [OQ-1](open-questions.md).
-4. **Multi-model side-by-side on one prompt** — the "brainstorm one idea with
-   several models" use case is currently manual: fork, switch model, re-ask.
-5. **Release path** so it can be installed by someone who is not the author.
+1. **Publish the 1.0.0 draft release** (author: changelog + button).
+2. **Community plugin store submission** — PR to `obsidianmd/obsidian-releases`.
+3. **Provider adapters** (Codex, Gemini, GLM CLIs) behind the `runPrompt`
+   seam — the README promises "Claude Code only for now" ([OQ-8](open-questions.md)).
+4. **Promote a co-source to primary** — the one missing move in the
+   detach/attach model.
+5. **Harden the chat-note format** before more fields accrete ([OQ-1](open-questions.md)).
+6. GIF showcase items for the README (static PNGs shipped).
 
 Anything here that turns into a real design choice should become an ADR, not a
 line item.

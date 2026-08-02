@@ -17,6 +17,12 @@ can rewrite tells you nothing about what was believed at the time.
 | [0007](0007-folder-derived-node-kind.md) | Node kind derived from folder, never stored | Accepted | Inferred from code |
 | [0008](0008-wikilinks-are-the-source-of-truth.md) | Wikilinks are the only edge store; canvas edits rewrite markdown | Accepted | Inferred from code |
 | [0009](0009-per-card-model-selection.md) | Model is a per-card, per-turn choice | Accepted | Stated by author |
+| [0010](0010-chats-render-as-chat-boxes.md) | Saved chats render as open chat boxes, never note pills | Accepted | Stated by author |
+| [0011](0011-detach-not-delete.md) | Chats can stand alone; edge deletion detaches, never deletes | Accepted | Stated by author |
+| [0012](0012-persisted-branch-levels.md) | Branch depth persists as `Level: N` in the note | Accepted | Stated by author |
+| [0013](0013-per-folder-chats.md) | Chats live with their notes: `<folder>/Chats` by default | Accepted | Stated by author |
+| [0014](0014-co-sources.md) | Attached notes are co-sources on the `Source:` line | Accepted | Stated by author |
+| [0015](0015-no-hover-effects.md) | No hover-driven canvas effects; feedback must not re-render | Accepted | Stated by author |
 
 ## Writing a new one
 

@@ -60,10 +60,11 @@ explain the module's contract in 2–4 lines — keep that up for new modules.
 ## Things that will bite you
 
 - **Edge `className` is behaviour.** `gc-edge` means "backed by a real
-  wikilink, deleting it rewrites a file." `gc-edge-chat` and `gc-edge-link` are
-  canvas-only. `onEdgesDelete` dispatches on this string. Renaming these
-  classes for styling reasons changes what the Delete key does to the user's
-  vault.
+  wikilink, deleting it rewrites a file." `gc-edge-chat`, `gc-edge-link`, and
+  `gc-edge-folder` are canvas-only. `onEdgesDelete` dispatches on this string
+  AND on endpoint node types (primary source vs co-source vs tag). Renaming
+  these classes for styling reasons changes what the Delete key does to the
+  user's vault.
 - **Handle ids are parsed**, not just labels: `onConnectEnd` matches
   `/^(plus|fork)-/` and reads the `left`/`right` suffix.
 - **Node paths are node ids.** A vault node's React Flow id *is* its

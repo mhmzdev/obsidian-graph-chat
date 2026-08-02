@@ -2,106 +2,116 @@
 
 **Synthesis layer.** These words are used precisely throughout the code and the
 docs. When they collide with a generic meaning (React Flow also says "node";
-Obsidian also says "graph"), the definition below wins.
+Obsidian also says "graph"), the definition below wins. Verified against
+`856681d`, 2026-08-02.
 
 ## Core objects
 
 **Vault node** — a markdown file that appears on the canvas. Identified by its
 vault-relative path, which doubles as its React Flow node id. Three **kinds**,
-derived entirely from the containing folder:
+derived entirely from location (`kindOf` / `isChatPath`):
 
 - **note** — anything chattable. The default.
 - **tag** — a page under `tagsFolder`. Renders as a `#pill` hub. Never
-  chattable; exists to be linked *to*. Dragging a tag's `+` onto a note tags
-  that note.
-- **chat** — a saved conversation under `chatsFolder`. Clicking it reopens the
-  thread; `+` forks it.
+  chattable; dragging its `+` onto a note or chat tags it.
+- **chat** — a saved conversation in any chat folder (the default folder, a
+  routed folder, or any `<folder>/Chats/`). **Renders as an open chat box**,
+  never as a note pill ([ADR 0010](decisions/0010-chats-render-as-chat-boxes.md)).
 
-**Chat card** — a live conversation window floating on the canvas. A React Flow
-node of type `chatCard` with **no file behind it**. Closing a card does not
-delete anything; the thread is already on disk.
+**Chat card** — the conversation window component (`ChatCardNode`). Two
+flavours with one implementation: **saved** cards whose node id *is* the chat
+file path (they hydrate from `loadPath`), and **ephemeral** cards (`chat-N`
+ids) that exist before the first save; once saved they carry
+`filePath`/`loadPath` and suppress the file's own node until the view reloads.
 
-**Thread** (`ChatThread`, `src/chat/persistence.ts:8`) — the conversation data:
-its source note, its Claude session id, its messages, and once saved, its file
-path. The durable form of a card.
+**Thread** (`ChatThread`, `src/chat/persistence.ts`) — the durable
+conversation data: primary source, co-sources, session id, level, tags, title,
+messages, file path.
 
-**Anchor** — the vault node a card hangs off (`anchorNodeId`). Drives where the
-card spawns, which edge connects it, and the "origin highlight" styling on the
-note itself. A fork's anchor is the *card* it forked from, not the note.
+**Primary source** — the first `[[link]]` on the `Source:` line; the note the
+chat was born from. Drives the card title, storage folder, and detach
+semantics.
 
-**Source note** — the note a thread is *about* (`sourceNotePath`). Written into
-the saved chat as `Source: [[…]]`. A fork inherits its parent's source note, so
-a whole fork tree stays attached to one note in the native Obsidian graph.
+**Co-source** — every further `[[link]]` on the `Source:` line: a note dragged
+onto the card to share its context. Equal in context, subordinate in identity
+([ADR 0014](decisions/0014-co-sources.md)). No chips UI — the relationship is
+the edge.
+
+**Anchor** (`anchorNodeId`) — the canvas node a card visually hangs off.
+Session-local only; not persisted.
 
 ## Conversation concepts
 
-**Turn** — one user message and the assistant reply it produces. Exactly one
-`claude -p` process. There is no persistent connection between turns.
+**Turn** — one user message and its reply. Exactly one `claude -p` process.
 
-**Session** — the Claude Code CLI's own conversation state, addressed by a
-session id. The plugin stores the id; the CLI stores the transcript. Continuity
-is `--resume <id>`.
+**Session** — the CLI's own conversation state, addressed by id, stored on
+**this machine** outside the vault. Continuity is `--resume <id>`. Chat notes
+sync across devices; sessions do not (see [OQ-3](open-questions.md)).
 
-> The session lives in the CLI's local store on **this machine**, outside the
-> vault. Chat notes sync between devices; the sessions they point at do not.
-> See [OQ-3](open-questions.md).
+**Branch** — *the* product word. A new conversation that remembers everything
+up to the branch point, then diverges. Mechanism: `--resume <parent>
+--fork-session` on the first turn; the child gets its own session id. The card
+opens **empty** — inherited context lives in the resumed session, not the UI.
+Level-1 chats (from a note) wear a `CHAT` chip; level-2+ wear `BRANCH`.
 
-**Fork** — a new conversation that inherits everything up to a point, then
-diverges. Implemented as `--resume <parent> --fork-session`, which gives the
-child its own session id on its first turn while leaving the parent untouched.
+> "Fork" survives only in mechanism names (`--fork-session`, `forkChat`,
+> `fork-left` handle ids). User-facing language says branch — a fork is not a
+> copy, and the word kept confusing people
+> ([input 2026-07-26](inputs/), commit `ffeaac3`).
 
-The card opens **empty**, not pre-filled with the parent's messages: the
-context lives inside the resumed session, not in the UI. That empty state is
-deliberate and is explained in the card itself
-(`src/components/ChatCardNode.tsx:278-283`).
+**Level** — branch depth, persisted as `Level: N` in the chat note. 1 = chat
+from a note; +1 per branch. Same-level chats cannot be linked; used instead of
+canvas lineage because lineage doesn't survive reloads
+([ADR 0012](decisions/0012-persisted-branch-levels.md)).
 
-**Branch** — the looser, user-facing word for opening *another* chat on the
-same note. Branches are independent conversations that share a subject; forks
-share a history. Both render as extra cards; only forks carry the `FORK` badge.
+**Orphan** — a chat with no `Level:` (detached, or pre-level legacy). Orphans
+stand alone, keep whatever context their session already absorbed, may be
+linked to any chat, and are adopted at the partner's level + 1.
 
-**Attached context** (`linkedNotes`) — notes dragged onto a card. Each is named
-in the prompt once, the first turn after it is attached, then never again
-(`consumedLinksRef`). They render as paperclip chips under the transcript.
+**Detach** — deleting a chat's primary-source edge. Removes `Source:` and
+`Level:` from the file; never deletes history
+([ADR 0011](decisions/0011-detach-not-delete.md)).
 
-## Model selection
+## Storage
 
-Each card carries its own model, chosen per turn from a footer picker: Sonnet,
-Fable 5, Opus, Haiku (`ChatCardNode.tsx:34-39`). The value is passed straight
-through as the CLI's `--model` alias.
+**Chat folder resolution** (`resolveChatsFolder`): explicit routing rule
+(longest source-folder match) → per-folder `<top-folder>/Chats` (default-on,
+per-folder opt-out in settings) → default chats folder. The subfolder name
+follows the default folder's basename ([ADR 0013](decisions/0013-per-folder-chats.md)).
 
-Switching mid-conversation is supported and intentional — the same thread can
-be continued by a different model, which is the point of the whole tool: one
-idea, several models, side by side. See
-[ADR 0009](decisions/0009-per-card-model-selection.md).
-
-> A model asked "which model are you?" answers from its own priors, not from
-> the flag, so it can answer wrong. This is captured in the screenshot in
-> `inputs/2026-07-25-ui-screenshots.md` and is a known cosmetic wart, not a
-> routing bug.
+**Title** — the `#` heading. AI-generated by a Haiku one-shot after the first
+exchange (file renames to `chat - <title>.md`); manual rename via the card
+title always wins.
 
 ## Canvas gestures
 
-**`+` handle** — the blue circle on a node's left and right edge. Click and
-drag mean different things (see `architecture.md`), and both are load-bearing.
+**`+` handle** — click = branch a chat; drag = draw a link (to a node → real
+wikilink/tag/co-source; to empty canvas → new card at the drop point). Handle
+ids encode intent (`plus-left`, `fork-right`); `onConnectEnd` pattern-matches
+`/^(plus|fork)-/`.
 
-**Side** (`BranchSide`, `"left" | "right"`) — which edge a gesture came from.
-Determines which side the new card appears on and which handles the connecting
-edge uses, so branching left grows the canvas leftward.
+**Side** (`BranchSide`) — which edge a gesture came from; determines card
+placement and which handles the edge uses, including for link edges (facing
+sides, never through a card's middle).
 
-**Highlight** — clicking a note that already has chats lights up the note, its
-saved chat notes, and its open cards instead of opening anything. The "show me
-what I've already asked about this" gesture.
+**Highlight / trace** — clicking a note with chats lights up the note, its
+chats, and the edges between them. Clicking the pane clears it. Clicking a
+note **never opens a chat** — creation is `+` only.
 
-**Origin highlight** — the persistent styling on a note that currently has an
-open card (`gc-anchor-active`), distinct from the transient click highlight.
+**Flow** — a selected node's edges animate (dashed) to show where its
+branches lead. Hover does nothing, by decision
+([ADR 0015](decisions/0015-no-hover-effects.md)).
+
+**Folder card** (`FolderNode`) — semantic-zoom overview node (zoom < 0.32),
+one per top-level folder. Chats group under their **source note's** folder,
+not their physical chat folder; only orphans fall back to the default chats
+folder card. Dragging a folder card moves its whole cluster.
 
 ## Naming conventions in code
 
-- CSS classes are `gc-` prefixed, all of them, in one `src/styles.css`.
-- Edge `className` is meaningful, not cosmetic — it is how edges are classified:
-  `gc-edge` (real wikilink, deletable → rewrites markdown), `gc-edge-chat`
-  (note → card), `gc-edge-link` (attached context). Changing one of these
-  strings changes behaviour, notably in `onEdgesDelete`.
-- Handle ids encode intent: `plus-left`, `fork-right`, `drop`, `from-right`.
-  `onConnectEnd` pattern-matches on `/^(plus|fork)-/` to decide whether a drop
-  on empty canvas should spawn anything (`GraphCanvas.tsx:479`).
+- CSS classes are `gc-` prefixed, in one `src/styles.css`.
+- Edge `className` is behaviour: `gc-edge` (real wikilink — deleting rewrites
+  a file), `gc-edge-chat` (branch line), `gc-edge-link` (context link),
+  `gc-edge-folder` (overview aggregate). `onEdgesDelete` dispatches on it.
+- Node ids are vault paths for anything on disk; `chat-N` for ephemeral cards;
+  `folder:<name>` in the overview.

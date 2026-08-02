@@ -12,7 +12,7 @@ the source and are expensive to relearn.
 - Output is **CJS**, target `es2020`. `obsidian`, `electron`, the CodeMirror
   packages, and Node builtins are external — they are provided by the host.
 - `main.js` is committed to `.gitignore` but **present in the working tree**;
-  it is the build artifact, ~690 KB. Do not read it, do not edit it, do not
+  it is the build artifact, ~720 KB. Do not read it, do not edit it, do not
   grep it — it is bundled React.
 - `npm run dev` starts esbuild in watch mode. It does **not** deploy. See the
   `plugin-dev` skill for the full loop.

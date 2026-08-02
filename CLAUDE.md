@@ -5,14 +5,17 @@ can be opened as a chat with Claude**. Conversations branch, fork, run on
 different models side by side, and persist back into the vault as ordinary
 notes.
 
-Status: **working prototype**, six UX rounds deep, one author, no tests, not
-released. It runs in the author's vault and nowhere else yet.
+Status: **released v1.0.0** (draft on GitHub pending the author's changelog),
+fourteen UX rounds deep, one author, no tests. Settings tab exists; defaults
+are generic; release pipeline is tag-driven CI.
 
 ```
 Obsidian ItemView → React 18 + React Flow canvas
-  ├─ note / tag / chat nodes   ← built from Obsidian's resolved link index
-  └─ chat cards                → spawn `claude -p` per turn, one process, read-only
-                               → every turn saved to a real markdown note
+  ├─ note / tag nodes          ← built from Obsidian's resolved link index
+  ├─ chat boxes                ← every saved chat renders as an OPEN conversation
+  │                            → spawn `claude -p` per turn, one process, read-only
+  │                            → every turn saved to a real markdown note
+  └─ folder cards              ← semantic-zoom overview below 0.32 zoom
 ```
 
 ## Read this before you work
@@ -51,10 +54,11 @@ synthesis (`architecture.md`, `domain.md`, `state.md`) is rewritten freely.**
 ## Commands
 
 ```bash
-npx tsc --noEmit   # the only typecheck — esbuild does NOT check types
-npm run dev        # watch build into the repo (does not deploy)
-npm run build      # production bundle
-npm run deploy     # build + copy into the author's vault
+npx tsc --noEmit           # the only typecheck — esbuild does NOT check types
+npm run dev                # watch build into the repo (does not deploy)
+npm run build              # production bundle
+npm run deploy             # build + copy into a vault (OBSIDIAN_VAULT env)
+npm run publish:patch      # bump + tag + push; CI drafts the GitHub release
 ```
 
 ## Non-negotiables
@@ -72,12 +76,17 @@ These are load-bearing. Breaking one is a product regression, not a refactor.
    markdown; deleting one rewrites a file. There is no second graph.
    → [ADR 0008](docs/decisions/0008-wikilinks-are-the-source-of-truth.md)
 4. **Edge `className` is behaviour, not styling.** `gc-edge` means "backed by a
-   real wikilink — deleting it edits the user's note." `gc-edge-chat` and
-   `gc-edge-link` are canvas-only. Renaming these for cosmetic reasons changes
-   what the Delete key does to someone's vault.
+   real wikilink — deleting it edits the user's note." `gc-edge-chat`,
+   `gc-edge-link`, and `gc-edge-folder` are canvas-only. Renaming these for
+   cosmetic reasons changes what the Delete key does to someone's vault.
+   Deleting never deletes a chat — detach only.
+   → [ADR 0011](docs/decisions/0011-detach-not-delete.md)
 5. **Never touch the filesystem directly.** `app.vault.process()` /
    `.modify()` / `.create()`. Never `fs` — it races Obsidian's own writer.
-6. **`main.js` is a 690 KB build artifact.** Never read, edit, or grep it.
+6. **`main.js` is a ~720 KB build artifact.** Never read, edit, or grep it.
+7. **No hover-driven effects on the canvas.** Hover feedback through React
+   state re-renders every mounted chat card; it was built, glitched, and
+   removed. → [ADR 0015](docs/decisions/0015-no-hover-effects.md)
 
 ## Working here
 
