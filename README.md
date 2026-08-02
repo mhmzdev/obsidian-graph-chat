@@ -6,6 +6,23 @@ Obsidian's graph view lets you *see* your knowledge. Graph Chat lets you *talk t
 
 > ⚠️ **Requires the [Claude Code](https://claude.com/claude-code) CLI** installed and authenticated on your machine. The plugin spawns it locally against your vault — no API keys, no separate billing, and it inherits your vault's `CLAUDE.md`, skills, and instructions. Support for other CLIs (Codex, Gemini, GLM, …) is planned for a future version.
 
+## Showcase
+
+<!-- Drop screenshots/GIFs into showcase/ and reference them here. -->
+<!-- Suggested shots:
+  showcase/graph-overview.png    — the full canvas with notes, tags, chats
+  showcase/chat-from-note.gif    — hover a note → + → ask → streamed reply
+  showcase/branching.gif         — branching a conversation, two models side by side
+  showcase/link-by-drag.gif      — dragging + onto a note/tag to create a wikilink
+  showcase/semantic-zoom.gif     — zooming out into folder cards and back
+-->
+
+![Graph overview](showcase/graph-overview.png)
+
+![Chat from a note](showcase/chat-from-note.gif)
+
+![Branching conversations](showcase/branching.gif)
+
 ## What it does
 
 - 🗺️ **Graph canvas** — your vault's notes, tags, and links rendered as an interactive canvas (force-layouted, positions persist once you arrange them).
