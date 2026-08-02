@@ -8,20 +8,21 @@ Obsidian's graph view lets you *see* your knowledge. Graph Chat lets you *talk t
 
 ## Showcase
 
-<!-- Drop screenshots/GIFs into showcase/ and reference them here. -->
-<!-- Suggested shots:
-  showcase/graph-overview.png    — the full canvas with notes, tags, chats
-  showcase/chat-from-note.gif    — hover a note → + → ask → streamed reply
-  showcase/branching.gif         — branching a conversation, two models side by side
-  showcase/link-by-drag.gif      — dragging + onto a note/tag to create a wikilink
-  showcase/semantic-zoom.gif     — zooming out into folder cards and back
--->
+**Your notes as an interactive canvas** — pan, zoom, arrange; positions persist.
 
-![Graph overview](showcase/graph-overview.png)
+![Notes view](showcase/2.notes_view.png)
 
-![Chat from a note](showcase/chat-from-note.gif)
+**Chat with any note** — the AI reads the note and its whole graph neighborhood, right on the canvas.
 
-![Branching conversations](showcase/branching.gif)
+![Chat view](showcase/3.chat_view.png)
+
+**Branch conversations** — each branch remembers everything up to the branch point, then diverges. Try the same question across different models, side by side.
+
+![Branch view](showcase/4.branch_view.png)
+
+**Semantic zoom** — zoom out and the vault collapses into folder cards; drag one to move its whole cluster.
+
+![Folder view](showcase/1.folder_view.png)
 
 ## What it does
 
