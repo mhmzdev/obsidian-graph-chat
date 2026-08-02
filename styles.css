@@ -1242,6 +1242,25 @@ button.gc-model-btn:hover:not(:disabled) {
   color: var(--link-color, var(--interactive-accent));
 }
 
+/* ---------- focus lens: hover dims everything outside the
+   hovered + selected neighborhoods (native-graph style) ---------- */
+
+.react-flow__node {
+  transition: opacity 0.2s ease;
+}
+
+.react-flow__node.gc-dim {
+  opacity: 0.14;
+}
+
+.react-flow__edge path {
+  transition: opacity 0.2s ease, stroke 0.15s ease;
+}
+
+.gc-dim-edge path {
+  opacity: 0.06;
+}
+
 /* ---------- highlight states ---------- */
 
 /* clicked note → its chats + edges glow */

@@ -870,12 +870,35 @@ function CanvasInner({
     return s;
   }, [nodes]);
 
+  const selectedIds = useMemo(
+    () => new Set(nodes.filter((n) => n.selected).map((n) => n.id)),
+    [nodes]
+  );
+
+  // hover = focus lens (native-graph style): everything outside the hovered
+  // + selected neighborhoods dims. Selection alone never dims the canvas.
+  const focus = useMemo(() => {
+    if (hoverId === null) return null;
+    const active = new Set<string>([hoverId, ...selectedIds]);
+    const nodesIn = new Set<string>(active);
+    const edgesIn = new Set<string>();
+    for (const e of edges) {
+      if (active.has(e.source) || active.has(e.target)) {
+        edgesIn.add(e.id);
+        nodesIn.add(e.source);
+        nodesIn.add(e.target);
+      }
+    }
+    return { nodes: nodesIn, edges: edgesIn };
+  }, [hoverId, selectedIds, edges]);
+
   const boundNodes = useMemo(
     () =>
       nodes.map((rawNode) => {
         const n = { ...rawNode, deletable: false }; // Delete key is for edges only
         const classes: string[] = [];
         if (highlight?.nodes.has(n.id)) classes.push("gc-glow");
+        if (focus !== null && !focus.nodes.has(n.id)) classes.push("gc-dim");
         if (n.type !== "chatCard" && activeAnchors.has(n.id))
           classes.push("gc-anchor-active");
         const className = classes.join(" ") || undefined;
@@ -908,15 +931,11 @@ function CanvasInner({
       tagsLoaded,
       highlight,
       activeAnchors,
+      focus,
     ]
   );
 
   // edges touching a selected node flow (dashed + animated) toward its children
-  const selectedIds = useMemo(
-    () => new Set(nodes.filter((n) => n.selected).map((n) => n.id)),
-    [nodes]
-  );
-
   const displayEdges = useMemo(
     () =>
       edges.map((e) => {
@@ -926,6 +945,14 @@ function CanvasInner({
           selectedIds.has(e.source) ||
           selectedIds.has(e.target) ||
           (hoverId !== null && (e.source === hoverId || e.target === hoverId));
+        const dim = focus !== null && !focus.edges.has(e.id);
+        if (dim) {
+          return {
+            ...e,
+            interactionWidth: 6,
+            className: (e.className ?? "") + " gc-dim-edge",
+          };
+        }
         // narrow hit zone: edges stay clickable but stop eating pan gestures
         if (!glow && !flow) return { ...e, interactionWidth: 6 };
         return {
@@ -937,7 +964,7 @@ function CanvasInner({
             .join(" "),
         };
       }),
-    [edges, highlight, selectedIds, hoverId]
+    [edges, highlight, selectedIds, hoverId, focus]
   );
 
   const onNodesChange = useCallback(
